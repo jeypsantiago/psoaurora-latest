@@ -64,6 +64,7 @@ const USER_SCOPED_APP_STATE_KEY_SET = new Set<string>(
 );
 
 const appStateRecordIdByKey = new Map<string, string>();
+const appStateMutationQueueByKey = new Map<string, Promise<void>>();
 const userBundleMutationQueueByOwner = new Map<string, Promise<void>>();
 
 const quoted = (value: string) => `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
@@ -246,6 +247,26 @@ const enqueueUserBundleMutation = async (ownerId: string, action: () => Promise<
   }
 };
 
+const enqueueAppStateMutation = async (storedKey: string, action: () => Promise<void>) => {
+  const previous = appStateMutationQueueByKey.get(storedKey) || Promise.resolve();
+
+  const next = previous
+    .catch(() => {
+      // Keep queue alive after failed mutation.
+    })
+    .then(action);
+
+  appStateMutationQueueByKey.set(storedKey, next);
+
+  try {
+    await next;
+  } finally {
+    if (appStateMutationQueueByKey.get(storedKey) === next) {
+      appStateMutationQueueByKey.delete(storedKey);
+    }
+  }
+};
+
 export const upsertAppStateFromStorageValue = async (key: string, rawValue: string, ownerId?: string | null) => {
   if (!backend.authStore.isValid || !isManagedAppStateKey(key)) return;
 
@@ -267,10 +288,12 @@ export const upsertAppStateFromStorageValue = async (key: string, rawValue: stri
     return;
   }
 
-  await upsertRecordByStoredKey(key, {
-    scope,
-    owner: undefined,
-    value,
+  await enqueueAppStateMutation(key, async () => {
+    await upsertRecordByStoredKey(key, {
+      scope,
+      owner: undefined,
+      value,
+    });
   });
 };
 
@@ -300,7 +323,9 @@ export const removeAppStateKey = async (key: string, ownerId?: string | null) =>
     return;
   }
 
-  await deleteRecordByStoredKey(key);
+  await enqueueAppStateMutation(key, async () => {
+    await deleteRecordByStoredKey(key);
+  });
 };
 
 export const loadManagedAppState = async (ownerId?: string | null): Promise<Record<string, string>> => {
@@ -344,6 +369,7 @@ export const clearAllManagedAppState = async (): Promise<void> => {
   }
 
   appStateRecordIdByKey.clear();
+  appStateMutationQueueByKey.clear();
   const userRecords = await backend.collection('users').getFullList({ sort: 'id' });
   for (const userRecord of userRecords) {
     const ownerId = String(userRecord.id);

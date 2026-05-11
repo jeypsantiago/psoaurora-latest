@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   AlertTriangle,
@@ -172,6 +172,8 @@ export const ReportMonitoringPage: React.FC = () => {
   const [reportForm, setReportForm] = useState<ReportFormState>(() =>
     emptyReportForm(projects),
   );
+  const didMountProjectsPersistence = useRef(false);
+  const didMountReportsPersistence = useRef(false);
 
   const usersById = useMemo(() => {
     const map = new Map(users.map((user) => [user.id, user]));
@@ -234,10 +236,18 @@ export const ReportMonitoringPage: React.FC = () => {
   }, [searchParams]);
 
   useEffect(() => {
+    if (!didMountProjectsPersistence.current) {
+      didMountProjectsPersistence.current = true;
+      return;
+    }
     writeStorageJson(STORAGE_KEYS.reportProjects, projects);
   }, [projects]);
 
   useEffect(() => {
+    if (!didMountReportsPersistence.current) {
+      didMountReportsPersistence.current = true;
+      return;
+    }
     writeStorageJson(STORAGE_KEYS.reportSubmissions, reports);
   }, [reports]);
 
