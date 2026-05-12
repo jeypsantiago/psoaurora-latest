@@ -12,42 +12,95 @@ export const REPORT_REMINDER_KEYS = {
 
 export const DEFAULT_REPORT_REMINDER_SETTINGS = {
   enabled: true,
+  dailyReminderEnabled: true,
   defaultLeadDays: 5,
+  overdueReminderDays: 5,
   dailyCheckTime: '08:00',
   subjectTemplate: 'Report reminder: {{reportTitle}} due on {{deadline}}',
   bodyTemplate:
-    `<div style="margin:0;padding:0;background:#f4f4f5;font-family:Arial,Helvetica,sans-serif;color:#18181b;">
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;background:#f4f4f5;padding:24px 0;">
-    <tr><td align="center">
-      <table role="presentation" width="640" cellspacing="0" cellpadding="0" style="width:640px;max-width:100%;border-collapse:collapse;background:#ffffff;border:1px solid #e4e4e7;border-radius:16px;overflow:hidden;">
-        <tr><td style="padding:24px 28px;border-bottom:1px solid #e4e4e7;background:#ffffff;">
-          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
-            <tr>
-              <td width="80" style="vertical-align:middle;">{{psaLogo}}</td>
-              <td style="vertical-align:middle;">
-                <div style="font-size:15px;font-weight:800;text-transform:uppercase;color:#18181b;">Philippine Statistics Authority</div>
-                <div style="font-size:13px;font-weight:700;color:#3f3f46;margin-top:3px;">Aurora Provincial Statistical Office</div>
-              </td>
-            </tr>
-          </table>
-        </td></tr>
-        <tr><td style="padding:28px;">
-          <div style="font-size:12px;font-weight:800;letter-spacing:0.12em;text-transform:uppercase;color:#2563eb;margin-bottom:10px;">Report Submission Reminder</div>
-          <h1 style="margin:0 0 18px;font-size:24px;line-height:1.25;color:#18181b;">Report due on <strong>{{deadline}}</strong></h1>
-          <p style="margin:0 0 18px;font-size:15px;line-height:1.6;color:#3f3f46;">Hello <strong>{{focalPersonName}}</strong>,</p>
-          <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#3f3f46;">This is an official reminder regarding the report below. Please complete, review, and submit it <strong>on or before the deadline</strong>.</p>
-          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;background:#f8fafc;border:1px solid #e4e4e7;border-radius:12px;margin:20px 0;">
-            <tr><td style="padding:14px 16px;font-size:13px;color:#71717a;border-bottom:1px solid #e4e4e7;">Project</td><td style="padding:14px 16px;font-size:14px;font-weight:800;color:#18181b;border-bottom:1px solid #e4e4e7;">{{projectName}}</td></tr>
-            <tr><td style="padding:14px 16px;font-size:13px;color:#71717a;border-bottom:1px solid #e4e4e7;">Report</td><td style="padding:14px 16px;font-size:14px;font-weight:800;color:#18181b;border-bottom:1px solid #e4e4e7;">{{reportTitle}}</td></tr>
-            <tr><td style="padding:14px 16px;font-size:13px;color:#71717a;border-bottom:1px solid #e4e4e7;">Reporting Period</td><td style="padding:14px 16px;font-size:14px;font-weight:800;color:#18181b;border-bottom:1px solid #e4e4e7;">{{period}}</td></tr>
-            <tr><td style="padding:14px 16px;font-size:13px;color:#71717a;">Deadline</td><td style="padding:14px 16px;font-size:14px;font-weight:900;color:#b91c1c;">{{deadline}}</td></tr>
-          </table>
-          <p style="margin:20px 0 0;font-size:14px;line-height:1.6;color:#52525b;">If the report has already been submitted, kindly disregard this reminder.</p>
-          <p style="margin:20px 0 0;font-size:14px;line-height:1.6;color:#52525b;">Thank you.</p>
-        </td></tr>
-        <tr><td style="padding:18px 28px;background:#18181b;color:#d4d4d8;font-size:12px;line-height:1.5;">Philippine Statistics Authority - Aurora Provincial Statistical Office</td></tr>
-      </table>
-    </td></tr>
+    `<div style="margin:0;padding:0;background:#eef2f7;font-family:Arial,Helvetica,sans-serif;color:#111827;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;background:#eef2f7;padding:28px 0;">
+    <tr>
+      <td align="center" style="padding:0 12px;">
+        <table role="presentation" width="640" cellspacing="0" cellpadding="0" style="width:640px;max-width:100%;border-collapse:collapse;background:#ffffff;border:1px solid #dbe3ef;border-radius:14px;overflow:hidden;">
+          <tr>
+            <td style="padding:24px 28px;background:#ffffff;border-bottom:4px solid #1d4ed8;">
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
+                <tr>
+                  <td width="78" style="vertical-align:middle;">{{psaLogo}}</td>
+                  <td style="vertical-align:middle;padding-left:6px;">
+                    <div style="font-size:16px;font-weight:800;line-height:1.3;color:#111827;">Philippine Statistics Authority</div>
+                    <div style="font-size:13px;font-weight:600;line-height:1.4;color:#4b5563;">Aurora Provincial Statistical Office</div>
+                    <div style="margin-top:8px;font-size:10px;font-weight:800;letter-spacing:0.16em;text-transform:uppercase;color:#1d4ed8;">Report Monitoring Reminder</div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:26px 28px 8px;background:#ffffff;">
+              <p style="margin:0 0 12px;font-size:14px;line-height:1.6;color:#374151;">Hello <strong style="color:#111827;">{{focalPersonName}}</strong>,</p>
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;background:#f8fafc;border:1px solid #dbe3ef;border-left:5px solid #dc2626;border-radius:12px;">
+                <tr>
+                  <td style="padding:20px 22px;">
+                    <div style="font-size:11px;font-weight:800;letter-spacing:0.14em;text-transform:uppercase;color:#1d4ed8;margin-bottom:8px;">Deadline Status</div>
+                    <h1 style="margin:0 0 10px;font-size:24px;line-height:1.25;color:#b91c1c;font-weight:800;">{{deadlineHeadline}}</h1>
+                    <p style="margin:0;font-size:14px;line-height:1.65;color:#374151;">{{deadlineDescription}}</p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:18px 28px 8px;background:#ffffff;">
+              <div style="font-size:12px;font-weight:800;letter-spacing:0.12em;text-transform:uppercase;color:#374151;margin-bottom:10px;">Report Details</div>
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;border:1px solid #e5e7eb;background:#ffffff;">
+                <tr>
+                  <td width="34%" style="padding:13px 15px;font-size:12px;font-weight:700;color:#6b7280;background:#f9fafb;border-bottom:1px solid #e5e7eb;">Project / Activity</td>
+                  <td style="padding:13px 15px;font-size:14px;font-weight:800;color:#111827;border-bottom:1px solid #e5e7eb;">{{projectName}}</td>
+                </tr>
+                <tr>
+                  <td width="34%" style="padding:13px 15px;font-size:12px;font-weight:700;color:#6b7280;background:#f9fafb;border-bottom:1px solid #e5e7eb;">Report</td>
+                  <td style="padding:13px 15px;font-size:14px;font-weight:800;color:#111827;border-bottom:1px solid #e5e7eb;">{{reportTitle}}</td>
+                </tr>
+                <tr>
+                  <td width="34%" style="padding:13px 15px;font-size:12px;font-weight:700;color:#6b7280;background:#f9fafb;border-bottom:1px solid #e5e7eb;">Reporting Period</td>
+                  <td style="padding:13px 15px;font-size:14px;font-weight:800;color:#111827;border-bottom:1px solid #e5e7eb;">{{period}}</td>
+                </tr>
+                <tr>
+                  <td width="34%" style="padding:13px 15px;font-size:12px;font-weight:700;color:#6b7280;background:#f9fafb;border-bottom:1px solid #e5e7eb;">Deadline</td>
+                  <td style="padding:13px 15px;font-size:14px;font-weight:900;color:#b91c1c;border-bottom:1px solid #e5e7eb;">{{deadline}}</td>
+                </tr>
+                <tr>
+                  <td width="34%" style="padding:13px 15px;font-size:12px;font-weight:700;color:#6b7280;background:#f9fafb;">Focal Email</td>
+                  <td style="padding:13px 15px;font-size:14px;font-weight:700;color:#111827;">{{focalPersonEmail}}</td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:18px 28px 24px;background:#ffffff;">
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;">
+                <tr>
+                  <td style="padding:16px 18px;">
+                    <div style="font-size:12px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;color:#1d4ed8;margin-bottom:6px;">Required Action</div>
+                    <p style="margin:0;font-size:14px;line-height:1.6;color:#1f2937;">Submit the report or update the submitted date in Report Monitoring if already completed.</p>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin:18px 0 0;font-size:13px;line-height:1.6;color:#4b5563;">If the report has already been submitted, kindly disregard this reminder.</p>
+              <p style="margin:12px 0 0;font-size:13px;line-height:1.6;color:#4b5563;">Thank you.</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:18px 28px;background:#111827;color:#d1d5db;font-size:12px;line-height:1.5;">
+              This is an automated reminder from the PSO Aurora Report Monitoring System.<br />
+              Philippine Statistics Authority - Aurora Provincial Statistical Office
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
   </table>
 </div>`,
 };
@@ -95,8 +148,111 @@ const getLeadDays = (report, project, settings) => {
   return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : 5;
 };
 
+const getOverdueReminderDays = (settings) => {
+  const parsed = Number(settings.overdueReminderDays ?? 5);
+  return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : 5;
+};
+
+const toDateOnly = (date) => {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const daysBetween = (fromDate, toDate) =>
+  Math.round((toDate.getTime() - fromDate.getTime()) / 86400000);
+
+const getReminderCheckpoint = ({ daysUntilDeadline, leadDays, overdueReminderDays, testMode }) => {
+  if (!testMode && (daysUntilDeadline > leadDays || daysUntilDeadline < -overdueReminderDays)) {
+    return null;
+  }
+
+  if (daysUntilDeadline > 0) {
+    const dayLabel = daysUntilDeadline === 1 ? 'tomorrow' : `in ${daysUntilDeadline} days`;
+    return {
+      stage: 'before-deadline',
+      triggerOffsetDays: daysUntilDeadline,
+      headline: `Report due ${dayLabel}`,
+      description:
+        'This is an official reminder that the report below is approaching its submission deadline. Please complete, review, and submit it on or before the deadline.',
+    };
+  }
+
+  if (daysUntilDeadline === 0) {
+    return {
+      stage: 'deadline-day',
+      triggerOffsetDays: 0,
+      headline: 'Report due today',
+      description:
+        'This is an official reminder that the report below is due today. Please submit the report or update the submitted date as soon as it is completed.',
+    };
+  }
+
+  if (daysUntilDeadline === -overdueReminderDays) {
+    const daysOverdue = Math.abs(daysUntilDeadline);
+    return {
+      stage: 'after-deadline',
+      triggerOffsetDays: daysUntilDeadline,
+      headline: `Report overdue by ${daysOverdue} day${daysOverdue === 1 ? '' : 's'}`,
+      description:
+        'This is an official overdue reminder. The report below has passed its deadline and still has no submitted date recorded.',
+    };
+  }
+
+  const daysOverdue = Math.abs(daysUntilDeadline);
+  return {
+    stage: 'after-deadline',
+    triggerOffsetDays: daysUntilDeadline,
+    headline: `Report overdue by ${daysOverdue} day${daysOverdue === 1 ? '' : 's'}`,
+    description:
+      'This is an official overdue reminder. The report below has passed its deadline and still has no submitted date recorded.',
+  };
+};
+
 const fillTemplate = (template, values) =>
   String(template || '').replace(/\{\{(\w+)\}\}/g, (_match, key) => String(values[key] ?? ''));
+
+const upgradeReminderTemplate = (template) =>
+  String(template || '')
+    .replace(
+      /<h1([^>]*)>\s*Report due on\s*<strong>\{\{deadline\}\}<\/strong>\s*<\/h1>/gi,
+      '<h1$1>{{deadlineHeadline}}</h1>',
+    )
+    .replace(
+      /<h1([^>]*)>\s*Test reminder for selected report\s*<\/h1>/gi,
+      '<h1$1>{{deadlineHeadline}}</h1>',
+    )
+    .replace(/Submission Countdown/gi, '{{deadlineHeadline}}')
+    .replace(
+      /This\s+is\s+an\s+official\s+reminder\s+that\s+the\s+report\s+below\s+is\s+approaching\s+its\s+submission\s+deadline\.\s*Please\s+complete,\s*review,\s*and\s+submit\s+it\s+on\s+or\s+before\s+the\s+deadline\./gi,
+      '{{deadlineDescription}}',
+    )
+    .replace(
+      /This\s+is\s+an\s+official\s+reminder\s+that\s+the\s+report\s+below\s+is\s+approaching\s+its\s+submission\s+deadline\.(?:\s|<br\s*\/?>|<\/?p[^>]*>)*Please\s+complete,\s*review,\s*and\s+submit\s+it\s+on\s+or\s+before\s+the\s+deadline\./gi,
+      '{{deadlineDescription}}',
+    )
+    .replace(
+      /This\s+is\s+an\s+official\s+reminder\s+that\s+the\s+report\s+below\s+is\s+approaching\s+its\s+submission\s+deadline\.\s*Please\s+ensure\s+that\s+it\s+is\s+completed,\s*reviewed,\s*and\s+submitted\s+on\s+or\s+before\s+the\s+due\s+date\./gi,
+      '{{deadlineDescription}}',
+    )
+    .replace(
+      /This\s+is\s+an\s+official\s+reminder\s+that\s+the\s+report\s+below\s+is\s+approaching\s+its\s+submission\s+deadline\.(?:\s|<br\s*\/?>|<\/?p[^>]*>)*Please\s+ensure\s+that\s+it\s+is\s+completed,\s*reviewed,\s*and\s+submitted\s+on\s+or\s+before\s+the\s+due\s+date\./gi,
+      '{{deadlineDescription}}',
+    )
+    .replace(
+      /This is an official reminder regarding the report below\. Please complete, review, and submit it <strong>on or before the deadline<\/strong>\./gi,
+      '{{deadlineDescription}}',
+    )
+    .replace(
+      /This is an official reminder regarding the report below\. Please complete, review, and submit it on or before the deadline\./gi,
+      '{{deadlineDescription}}',
+    )
+    .replace(
+      /This\s+is\s+a\s+manual\s+test\s+reminder\s+for\s+the\s+report\s+below\.\s*Please\s+verify\s+the\s+recipient,\s*content,\s*and\s+SMTP\s+delivery\./gi,
+      '{{deadlineDescription}}',
+    );
 
 const escapeHtml = (value) =>
   String(value ?? '')
@@ -294,25 +450,39 @@ export const runReportReminders = async ({
   ]);
 
   const settings = { ...DEFAULT_REPORT_REMINDER_SETTINGS, ...(rawSettings && typeof rawSettings === 'object' ? rawSettings : {}) };
+  settings.enabled = typeof settings.enabled === 'boolean' ? settings.enabled : DEFAULT_REPORT_REMINDER_SETTINGS.enabled;
+  settings.dailyReminderEnabled =
+    typeof settings.dailyReminderEnabled === 'boolean'
+      ? settings.dailyReminderEnabled
+      : DEFAULT_REPORT_REMINDER_SETTINGS.dailyReminderEnabled;
+  settings.defaultLeadDays = getLeadDays({}, {}, settings);
+  settings.overdueReminderDays = getOverdueReminderDays(settings);
   const reminderLog = Array.isArray(rawLog) ? rawLog : [];
   const projectList = Array.isArray(projects) ? projects : [];
   const reportList = Array.isArray(submissions) ? submissions : [];
 
-  if (!settings.enabled && !testMode && requireEnabled) {
+  if ((!settings.enabled || !settings.dailyReminderEnabled) && !testMode && requireEnabled) {
     return { sent: 0, failed: 0, skipped: 0, disabled: true };
   }
 
   const userRecords = await pb.collection('users').getFullList({ sort: 'name' });
   const usersById = new Map(userRecords.map((user) => [String(user.id), user]));
   const projectsById = new Map(projectList.map((project) => [String(project.id), project]));
-  const sentReportIds = new Set(
+  const sentReminderDates = new Set(
     reminderLog
       .filter((entry) => entry.status === 'sent')
-      .map((entry) => String(entry.reportId)),
+      .map((entry) => {
+        const reportId = String(entry.reportId || '');
+        const reminderDate =
+          String(entry.reminderDate || '').slice(0, 10) ||
+          toDateOnly(normalizeDate(entry.sentAt) || new Date(entry.sentAt || ''));
+        return `${reportId}:${reminderDate}`;
+      }),
   );
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+  const reminderDate = toDateOnly(today);
   const nextLog = [...reminderLog];
   let sent = 0;
   let failed = 0;
@@ -329,7 +499,7 @@ export const runReportReminders = async ({
       continue;
     }
 
-    if (!testMode && (report.submittedDate || report.archived || sentReportIds.has(String(report.id)))) {
+    if (!testMode && (report.submittedDate || report.archived)) {
       skipped += 1;
       continue;
     }
@@ -347,9 +517,20 @@ export const runReportReminders = async ({
     }
 
     const leadDays = getLeadDays(report, project, settings);
-    const reminderStart = new Date(deadline);
-    reminderStart.setDate(deadline.getDate() - leadDays);
-    if (!testMode && (today < reminderStart || today > deadline)) {
+    const overdueReminderDays = getOverdueReminderDays(settings);
+    const daysUntilDeadline = daysBetween(today, deadline);
+    const checkpoint = getReminderCheckpoint({
+      daysUntilDeadline,
+      leadDays,
+      overdueReminderDays,
+      testMode,
+    });
+    if (!checkpoint) {
+      skipped += 1;
+      continue;
+    }
+    const sentTodayKey = `${String(report.id)}:${reminderDate}`;
+    if (!testMode && sentReminderDates.has(sentTodayKey)) {
       skipped += 1;
       continue;
     }
@@ -363,6 +544,10 @@ export const runReportReminders = async ({
       focalUserId: String(project.focalUserId || ''),
       focalEmail,
       sentAt: new Date().toISOString(),
+      reminderStage: checkpoint.stage,
+      triggerOffsetDays: checkpoint.triggerOffsetDays,
+      daysUntilDeadline,
+      reminderDate,
     };
 
     if (!focalEmail) {
@@ -376,13 +561,20 @@ export const runReportReminders = async ({
       reportTitle: report.title || 'Untitled report',
       period: report.period || '',
       deadline: String(report.deadline || ''),
+      daysUntilDeadline: String(daysUntilDeadline),
+      reminderStage: checkpoint.stage,
+      triggerOffsetDays: String(checkpoint.triggerOffsetDays),
+      reminderDate,
+      deadlineHeadline: checkpoint.headline,
+      deadlineDescription: checkpoint.description,
+      countdownSentence: checkpoint.description,
       focalPersonName: focal?.name || focalEmail,
       focalPersonEmail: focalEmail,
       psaLogo: buildPsaLogoHtml(),
     };
 
     const subject = fillTemplate(settings.subjectTemplate, values);
-    const htmlBody = fillTemplate(settings.bodyTemplate, values);
+    const htmlBody = fillTemplate(upgradeReminderTemplate(settings.bodyTemplate), values);
     const textBody = stripHtmlToText(htmlBody) || [
       'PHILIPPINE STATISTICS AUTHORITY',
       'Aurora Provincial Statistical Office',
@@ -393,17 +585,23 @@ export const runReportReminders = async ({
       `Report: ${values.reportTitle}`,
       `Reporting Period: ${values.period}`,
       `Deadline: ${values.deadline}`,
+      '',
+      values.deadlineDescription,
     ].join('\n');
 
     try {
       if (dryRun) {
-        console.log(`[report-reminders] DRY RUN${testMode ? ' TEST' : ''} ${encodeAddress(values.focalPersonName, focalEmail)} | ${subject}`);
+        console.log(`[report-reminders] DRY RUN${testMode ? ' TEST' : ''} ${checkpoint.stage} ${encodeAddress(values.focalPersonName, focalEmail)} | ${subject}`);
       } else {
         await sendReportReminderEmail({ to: focalEmail, subject, htmlBody, textBody });
       }
       sent += 1;
       if (!dryRun) {
-        nextLog.push({ ...logBase, status: testMode ? 'manual-test' : 'sent' });
+        nextLog.push({
+          ...logBase,
+          reminderStage: checkpoint.stage,
+          status: testMode ? 'manual-test' : 'sent',
+        });
       }
     } catch (error) {
       failed += 1;

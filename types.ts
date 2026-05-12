@@ -122,6 +122,10 @@ export interface ReportReminderLog {
   focalEmail: string;
   sentAt: string;
   status: 'sent' | 'failed' | 'skipped' | 'manual-test';
+  reminderStage?: 'before-deadline' | 'deadline-day' | 'after-deadline' | 'manual-test';
+  triggerOffsetDays?: number;
+  daysUntilDeadline?: number;
+  reminderDate?: string;
   errorMessage?: string;
 }
 

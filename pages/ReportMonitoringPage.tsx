@@ -19,7 +19,7 @@ import {
   Settings2,
   Trash2,
 } from "lucide-react";
-import { Badge, Button, Card, Input, Modal } from "../components/ui";
+import { Badge, Button, Input, Modal } from "../components/ui";
 import { STORAGE_KEYS } from "../constants/storageKeys";
 import { useDialog } from "../DialogContext";
 import { useRbac } from "../RbacContext";
@@ -112,13 +112,6 @@ const statusLabel: Record<ReportStatus, string> = {
   overdue: "Overdue",
 };
 
-const statusBadge: Record<ReportStatus, "default" | "success" | "warning" | "info"> = {
-  submitted: "success",
-  pending: "default",
-  "due-soon": "warning",
-  overdue: "warning",
-};
-
 const byUpdatedDesc = <T extends { updatedAt: string; createdAt: string }>(a: T, b: T) =>
   (Date.parse(b.updatedAt || b.createdAt) || 0) -
   (Date.parse(a.updatedAt || a.createdAt) || 0);
@@ -160,6 +153,12 @@ export const ReportMonitoringPage: React.FC = () => {
   const [projectReportView, setProjectReportView] = useState<ProjectReportView>("active");
   const [projectReportQuery, setProjectReportQuery] = useState("");
   const [projectSearchQuery, setProjectSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<ReportStatus | "all">("all");
+  const [deadlineFilter, setDeadlineFilter] = useState<
+    "all" | "due-soon" | "overdue" | "submitted" | "no-submission"
+  >("all");
+  const [focalFilter, setFocalFilter] = useState("all");
+  const [projectFilter, setProjectFilter] = useState("all");
   const [manualSendingReportId, setManualSendingReportId] = useState<string | null>(null);
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
@@ -475,6 +474,61 @@ export const ReportMonitoringPage: React.FC = () => {
     activeTab !== "due-soon" && projectReportView === "history"
       ? selectedHistoryRows
       : selectedCurrentRows;
+
+  const focalFilterOptions = useMemo(() => {
+    const seen = new Set<string>();
+    return allReportRows
+      .map((row) => row.focal)
+      .filter((focal): focal is User => {
+        if (!focal?.id || seen.has(focal.id)) return false;
+        seen.add(focal.id);
+        return true;
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [allReportRows]);
+
+  const applyReportFilters = (rows: ReportRow[], includeProjectFilter: boolean) => {
+    const search = projectReportQuery.trim().toLowerCase();
+    return rows.filter((row) => {
+      if (statusFilter !== "all" && row.status !== statusFilter) return false;
+      if (focalFilter !== "all" && row.focal?.id !== focalFilter) return false;
+      if (includeProjectFilter && projectFilter !== "all" && row.project?.id !== projectFilter) {
+        return false;
+      }
+      if (deadlineFilter === "due-soon" && row.status !== "due-soon") return false;
+      if (deadlineFilter === "overdue" && row.status !== "overdue") return false;
+      if (deadlineFilter === "submitted" && !row.report.submittedDate) return false;
+      if (deadlineFilter === "no-submission" && row.report.submittedDate) return false;
+      if (!search) return true;
+
+      return [
+        row.project?.name,
+        row.project?.notes,
+        row.report.title,
+        row.report.period,
+        row.report.remarks,
+        row.focal?.name,
+        row.focal?.email,
+        row.focal?.position,
+        formatReportFrequency(row.report.frequency),
+        statusLabel[row.status],
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(search);
+    });
+  };
+
+  const filteredVisibleProjectRows = applyReportFilters(visibleProjectRows, false);
+  const filteredReportRows = applyReportFilters(reportRows, true);
+  const rightPanelRows = activeTab === "projects" ? filteredVisibleProjectRows : filteredReportRows;
+  const rightPanelTitle =
+    activeTab === "projects"
+      ? selectedProjectGroup?.project.name || "Project Reports"
+      : activeTab === "due-soon"
+        ? "Due Soon Reports"
+        : "All Report Schedules";
 
   const stats = useMemo(() => {
     const currentReports = visibleReports.filter((report) => !isReportHistoryRecord(report));
@@ -801,7 +855,7 @@ export const ReportMonitoringPage: React.FC = () => {
   };
 
   const exportCsv = () => {
-    const rows = reportRows.map((row) => ({
+    const rows = filteredReportRows.map((row) => ({
       Project: row.project?.name || "Missing project",
       Report: row.report.title,
       Period: row.report.period,
@@ -836,222 +890,219 @@ export const ReportMonitoringPage: React.FC = () => {
       <button
         type="button"
         onClick={() => openSubmittedDateEditor(report)}
-        className="inline-flex min-w-[132px] flex-col items-start rounded-xl border border-transparent px-2.5 py-2 text-left text-sm text-zinc-700 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 dark:text-zinc-300 dark:hover:border-blue-500/30 dark:hover:bg-blue-500/10 dark:hover:text-blue-300"
+        className="inline-flex w-full min-w-0 items-center truncate rounded-md border border-transparent px-1.5 py-1 text-left text-xs font-semibold text-zinc-700 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 dark:text-zinc-300 dark:hover:border-blue-500/30 dark:hover:bg-blue-500/10 dark:hover:text-blue-300"
         title="Edit submitted date"
       >
-        <span className="font-bold">{formatReportDate(report.submittedDate)}</span>
-        <span className="mt-0.5 text-[10px] font-black uppercase tracking-widest text-zinc-400">
-          Edit Date
-        </span>
+        {formatReportDate(report.submittedDate)}
       </button>
     ) : (
-      <span className="text-sm text-zinc-600 dark:text-zinc-300">
+      <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
         {formatReportDate(report.submittedDate)}
       </span>
     );
 
+  const renderReportStatus = (status: ReportStatus) => {
+    const classes: Record<ReportStatus, string> = {
+      submitted:
+        "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300",
+      pending:
+        "border-zinc-200 bg-zinc-100 text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300",
+      "due-soon":
+        "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300",
+      overdue:
+        "border-red-200 bg-red-50 text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300",
+    };
+    return (
+      <span
+        className={`inline-flex rounded-full border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${classes[status]}`}
+      >
+        {statusLabel[status]}
+      </span>
+    );
+  };
+
+  const getReminderBadge = (row: ReportRow) => {
+    if (!settings.enabled) {
+      return {
+        label: "Disabled",
+        className:
+          "border-zinc-200 bg-zinc-100 text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300",
+      };
+    }
+    if (row.lastReminder?.status === "sent" || row.lastReminder?.status === "manual-test") {
+      return {
+        label: "Sent",
+        className:
+          "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300",
+      };
+    }
+    if (!row.focal?.email || row.lastReminder?.status === "failed") {
+      return {
+        label: "Not Ready",
+        className:
+          "border-red-200 bg-red-50 text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300",
+      };
+    }
+    if (row.status === "due-soon" || row.status === "overdue") {
+      return {
+        label: "Ready",
+        className:
+          "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300",
+      };
+    }
+    return {
+      label: "Not Ready",
+      className:
+        "border-zinc-200 bg-white text-zinc-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400",
+    };
+  };
+
   const renderReportActions = (row: ReportRow) => (
-    <div className="flex justify-end gap-1">
+    <div className="flex flex-wrap justify-end gap-0.5">
       {isSuperAdmin && (
         <button
           onClick={() => sendManualTestReminder(row)}
           disabled={manualSendingReportId === row.report.id}
-          className="p-2 rounded-lg text-zinc-400 hover:text-blue-600 hover:bg-zinc-50 disabled:opacity-50 dark:hover:bg-zinc-900"
+          className="rounded-md p-1 text-zinc-400 hover:bg-zinc-50 hover:text-blue-600 disabled:opacity-50 dark:hover:bg-zinc-900"
           title="Send test reminder"
         >
           {manualSendingReportId === row.report.id ? (
-            <MailCheck size={15} />
+            <MailCheck size={14} />
           ) : (
-            <Send size={15} />
+            <Send size={14} />
           )}
         </button>
       )}
       {can("reports.edit") && row.isHistory && !row.hasCurrentNext && (
         <button
           onClick={() => generateNextReport(row.report)}
-          className="p-2 rounded-lg text-zinc-400 hover:text-emerald-600 hover:bg-zinc-50 dark:hover:bg-zinc-900"
+          className="rounded-md p-1 text-zinc-400 hover:bg-zinc-50 hover:text-emerald-600 dark:hover:bg-zinc-900"
           title="Generate next period"
         >
-          <FilePlus2 size={15} />
+          <FilePlus2 size={14} />
         </button>
       )}
       {can("reports.edit") && (
         <button
           onClick={() => openEditReport(row.report)}
-          className="p-2 rounded-lg text-zinc-400 hover:text-blue-600 hover:bg-zinc-50 dark:hover:bg-zinc-900"
+          className="rounded-md p-1 text-zinc-400 hover:bg-zinc-50 hover:text-blue-600 dark:hover:bg-zinc-900"
           title="Edit report"
         >
-          <Edit3 size={15} />
+          <Edit3 size={14} />
         </button>
       )}
       {can("reports.delete") && (
         <button
           onClick={() => deleteReport(row.report)}
-          className="p-2 rounded-lg text-zinc-400 hover:text-red-500 hover:bg-zinc-50 dark:hover:bg-zinc-900"
+          className="rounded-md p-1 text-zinc-400 hover:bg-zinc-50 hover:text-red-500 dark:hover:bg-zinc-900"
           title="Delete report"
         >
-          <Trash2 size={15} />
+          <Trash2 size={14} />
         </button>
       )}
     </div>
   );
 
-  const renderReportCards = (rows: ReportRow[]) => (
-    <div className="space-y-3">
-      {rows.map((row) => (
-        <article
-          key={row.report.id}
-          className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950"
-        >
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <h4 className="text-sm font-black leading-tight text-zinc-900 dark:text-white">
-                  {row.report.title}
-                </h4>
-                <Badge variant={statusBadge[row.status]}>{statusLabel[row.status]}</Badge>
-                <Badge variant="info">{formatReportFrequency(row.report.frequency)}</Badge>
-                {row.isHistory && <Badge variant="default">History</Badge>}
-                {row.report.generatedFromReportId && !row.isHistory && (
-                  <Badge variant="success">Next generated</Badge>
-                )}
-              </div>
-              <p className="mt-1 text-xs font-semibold text-zinc-600 dark:text-zinc-300">
-                {row.report.period || "No period"}
-              </p>
-              {row.report.remarks && (
-                <p className="mt-2 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
-                  {row.report.remarks}
-                </p>
-              )}
-            </div>
-            {renderReportActions(row)}
-          </div>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-900/50">
-              <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
-                Deadline
-              </p>
-              <p className="mt-1 text-sm font-black text-zinc-900 dark:text-white">
-                {formatReportDate(row.report.deadline)}
-              </p>
-            </div>
-            <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-900/50">
-              <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
-                Submitted
-              </p>
-              <div className="mt-1">{renderSubmittedCell(row.report)}</div>
-            </div>
-            <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-900/50">
-              <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
-                Reminder
-              </p>
-              <p className="mt-1 text-sm font-black text-zinc-900 dark:text-white">
-                {row.leadDays} days before
-              </p>
-              <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
-                {row.lastReminder
-                  ? `${row.lastReminder.status}: ${formatReportDate(row.lastReminder.sentAt.slice(0, 10))}`
-                  : "Not sent"}
-              </p>
-            </div>
-            <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-900/50">
-              <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
-                Focal Person
-              </p>
-              <p className="mt-1 truncate text-sm font-black text-zinc-900 dark:text-white">
-                {row.focal?.name || "Needs attention"}
-              </p>
-              <p className="truncate text-[11px] text-zinc-500 dark:text-zinc-400">
-                {row.focal?.email || "No email available"}
-              </p>
-            </div>
-          </div>
-        </article>
-      ))}
-      {rows.length === 0 && (
-        <div className="rounded-2xl border border-dashed border-zinc-300 p-8 text-center dark:border-zinc-700">
-          <MailWarning size={30} className="mx-auto mb-3 text-zinc-400" />
-          <p className="text-sm font-bold text-zinc-900 dark:text-white">
-            No reports match this project view.
-          </p>
-          <p className="mt-1 text-xs text-zinc-500">Add a report schedule or adjust filters.</p>
-        </div>
-      )}
-    </div>
-  );
-
   const renderReportRows = (rows: ReportRow[], options: { showProject: boolean }) => (
-    <div className="overflow-x-auto -mx-5 sm:mx-0">
-      <table className="w-full min-w-[1080px] text-left">
-        <thead>
-          <tr className="border-b border-zinc-100 dark:border-zinc-800">
+    <div className="max-h-[calc(100vh-330px)] min-h-[320px] overflow-auto rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+      <table className="w-full table-fixed border-collapse text-left">
+        <colgroup>
+          {options.showProject && <col className="w-[12%]" />}
+          <col className={options.showProject ? "w-[15%]" : "w-[16%]"} />
+          <col className={options.showProject ? "w-[5%]" : "w-[6%]"} />
+          <col className={options.showProject ? "w-[8%]" : "w-[9%]"} />
+          <col className={options.showProject ? "w-[8%]" : "w-[9%]"} />
+          <col className={options.showProject ? "w-[14%]" : "w-[15%]"} />
+          <col className={options.showProject ? "w-[10%]" : "w-[10%]"} />
+          <col className={options.showProject ? "w-[7%]" : "w-[7%]"} />
+          <col className={options.showProject ? "w-[6%]" : "w-[6%]"} />
+          <col className={options.showProject ? "w-[9%]" : "w-[14%]"} />
+          <col className={options.showProject ? "w-[6%]" : "w-[8%]"} />
+        </colgroup>
+        <thead className="sticky top-0 z-10 bg-zinc-100 dark:bg-zinc-900">
+          <tr>
             {[
               ...(options.showProject ? ["Project"] : []),
-              "Report",
-              "Frequency",
+              "Report / Period",
+              "Freq.",
               "Deadline",
               "Submitted",
-              "Focal Person",
-              "Reminder",
+              "Focal / Office",
+              "Reminder Window",
+              "Reminder Status",
               "Status",
-              "",
+              "Remarks",
+              "Actions",
             ].map((heading) => (
               <th
                 key={heading}
-                className="pb-4 px-5 sm:px-0 text-[11px] font-bold text-zinc-400 uppercase tracking-wider"
+                className="border-b border-r border-zinc-200 px-2 py-2 text-[10px] font-bold uppercase tracking-wide text-zinc-600 last:border-r-0 dark:border-zinc-800 dark:text-zinc-400"
               >
                 {heading}
               </th>
             ))}
           </tr>
         </thead>
-        <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-          {rows.map((row) => (
-            <tr key={row.report.id} className="group">
+        <tbody>
+          {rows.map((row) => {
+            const reminderBadge = getReminderBadge(row);
+            return (
+            <tr
+              key={row.report.id}
+              className={`group border-b border-zinc-100 last:border-b-0 dark:border-zinc-800 ${
+                row.status === "overdue"
+                  ? "bg-red-50/40 dark:bg-red-500/5"
+                  : row.status === "due-soon"
+                    ? "bg-amber-50/40 dark:bg-amber-500/5"
+                    : "hover:bg-zinc-50/80 dark:hover:bg-zinc-900/50"
+              }`}
+            >
               {options.showProject && (
-                <td className="py-4 px-5 sm:px-0">
-                  <p className="text-sm font-bold text-zinc-900 dark:text-white">
+                <td className="max-w-[210px] border-r border-zinc-100 px-3 py-2 align-top dark:border-zinc-800">
+                  <p className="truncate text-xs font-bold text-zinc-900 dark:text-white">
                     {row.project?.name || "Missing project"}
                   </p>
-                  <p className="text-[11px] text-zinc-500">
+                  <p className="text-[10px] font-medium text-zinc-500">
                     {row.project?.active === false ? "Inactive" : "Active"}
                   </p>
                 </td>
               )}
-              <td className="py-4 px-5 sm:px-0">
-                <p className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">
-                  {row.report.title}
-                </p>
-                <div className="mt-1 flex flex-wrap gap-1.5">
-                  <Badge variant={row.isHistory ? "default" : "info"}>
+              <td className="border-r border-zinc-100 px-3 py-2 align-top dark:border-zinc-800">
+                <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                  <p className="min-w-0 max-w-full truncate text-xs font-bold text-zinc-800 dark:text-zinc-100">
+                    {row.report.title}
+                  </p>
+                  <span className="inline-flex max-w-[120px] items-center truncate rounded-full border border-zinc-200 bg-white px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
+                    {row.report.period || "No period"}
+                  </span>
+                </div>
+                <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                  <Badge variant={row.isHistory ? "default" : "info"} className="!px-1.5 !text-[9px]">
                     {row.isHistory ? "History" : "Recurring"}
                   </Badge>
                   {row.report.generatedFromReportId && !row.isHistory && (
-                    <Badge variant="success">Next generated</Badge>
+                    <Badge variant="success" className="!px-1.5 !text-[9px]">Next generated</Badge>
                   )}
                 </div>
-                <p className="text-[11px] text-zinc-500">{row.report.period || "No period"}</p>
-                {row.report.remarks && (
-                  <p className="text-[11px] text-zinc-500 max-w-[260px] truncate">
-                    {row.report.remarks}
-                  </p>
-                )}
               </td>
-              <td className="py-4 px-5 sm:px-0">
-                <Badge variant="info">{formatReportFrequency(row.report.frequency)}</Badge>
+              <td className="border-r border-zinc-100 px-3 py-2 align-top dark:border-zinc-800">
+                <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                  {formatReportFrequency(row.report.frequency)}
+                </span>
               </td>
-              <td className="py-4 px-5 sm:px-0 text-sm font-bold text-zinc-900 dark:text-white">
-                {formatReportDate(row.report.deadline)}
+              <td className="border-r border-zinc-100 px-3 py-2 align-top dark:border-zinc-800">
+                <span className={`text-xs font-bold ${row.status === "overdue" ? "text-red-700 dark:text-red-300" : row.status === "due-soon" ? "text-amber-700 dark:text-amber-300" : "text-zinc-900 dark:text-white"}`}>
+                  {formatReportDate(row.report.deadline)}
+                </span>
               </td>
-              <td className="py-4 px-5 sm:px-0">{renderSubmittedCell(row.report)}</td>
-              <td className="py-4 px-5 sm:px-0">
-                <p className="text-xs font-bold text-zinc-900 dark:text-white">
+              <td className="border-r border-zinc-100 px-3 py-1.5 align-top dark:border-zinc-800">{renderSubmittedCell(row.report)}</td>
+              <td className="max-w-[210px] border-r border-zinc-100 px-3 py-2 align-top dark:border-zinc-800">
+                <p className="truncate text-xs font-bold text-zinc-900 dark:text-white">
                   {row.focal?.name || "Needs attention"}
                 </p>
-                <p className="text-[11px] text-zinc-500">{row.focal?.email || "No email available"}</p>
+                <p className="truncate text-[10px] text-zinc-500">{row.focal?.position || row.focal?.email || "No office/unit recorded"}</p>
               </td>
-              <td className="py-4 px-5 sm:px-0">
+              <td className="border-r border-zinc-100 px-3 py-2 align-top dark:border-zinc-800">
                 <p className="text-xs font-bold text-zinc-900 dark:text-white">
                   {row.leadDays} days before
                 </p>
@@ -1061,20 +1112,31 @@ export const ReportMonitoringPage: React.FC = () => {
                     : "Not sent"}
                 </p>
               </td>
-              <td className="py-4 px-5 sm:px-0">
-                <Badge variant={statusBadge[row.status]}>{statusLabel[row.status]}</Badge>
+              <td className="border-r border-zinc-100 px-2 py-2 text-center align-top dark:border-zinc-800">
+                <span className={`inline-flex rounded-full border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${reminderBadge.className}`}>
+                  {reminderBadge.label}
+                </span>
               </td>
-              <td className="py-4 px-5 sm:px-0">
-                <div className="flex justify-end gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+              <td className="border-r border-zinc-100 px-2 py-2 text-center align-top dark:border-zinc-800">
+                {renderReportStatus(row.status)}
+              </td>
+              <td className="max-w-[220px] border-r border-zinc-100 px-3 py-2 align-top dark:border-zinc-800">
+                <p className="truncate text-xs text-zinc-600 dark:text-zinc-400">
+                  {row.report.remarks || "-"}
+                </p>
+              </td>
+              <td className="px-1.5 py-1.5 align-top">
+                <div className="flex justify-center gap-0.5">
                   {renderReportActions(row)}
                 </div>
               </td>
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </table>
       {rows.length === 0 && (
-        <div className="py-12 text-center">
+        <div className="py-10 text-center">
           <MailWarning size={30} className="mx-auto text-zinc-400 mb-3" />
           <p className="text-sm font-bold text-zinc-900 dark:text-white">
             No reports match the current view.
@@ -1085,472 +1147,585 @@ export const ReportMonitoringPage: React.FC = () => {
     </div>
   );
 
+  const modalShellClass =
+    "!max-h-[85vh] !rounded-[20px] border border-zinc-200 shadow-2xl dark:border-zinc-800";
+  const modalHeaderClass =
+    "!items-start !px-5 !py-4 !border-zinc-200 dark:!border-zinc-800";
+  const modalTitleClass =
+    "!normal-case !tracking-normal !leading-tight";
+  const modalBodyClass = "!p-5";
+  const modalFooterClass =
+    "!px-5 !py-4 !border-zinc-200 !bg-zinc-50/80 dark:!border-zinc-800 dark:!bg-zinc-900/30";
+  const modalCloseClass = "!rounded-lg !p-2";
+  const fieldClass =
+    "!h-10 !rounded-lg !border-zinc-300 !bg-white !px-3 !py-2 !text-[13px] dark:!border-zinc-700 dark:!bg-zinc-950";
+  const selectClass =
+    "h-10 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-[13px] font-medium text-zinc-900 outline-none transition-all focus:border-blue-500/50 focus:ring-2 focus:ring-blue-500/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100";
+  const textareaClass =
+    "min-h-[88px] w-full resize-none rounded-lg border border-zinc-300 bg-white px-3 py-2 text-[13px] text-zinc-900 outline-none transition-all placeholder:text-zinc-400 focus:border-blue-500/50 focus:ring-2 focus:ring-blue-500/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100";
+  const fieldLabelClass =
+    "ml-1 text-[11px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400";
+  const sectionTitleClass =
+    "text-[11px] font-extrabold uppercase tracking-wider text-zinc-700 dark:text-zinc-300";
+  const projectModalTitle = projectForm.id ? "Edit Activity/Project" : "New Activity/Project";
+  const projectModalSubtitle = projectForm.id
+    ? "Update project details, focal person, frequency, reminder settings, and activity status."
+    : "Create a project or activity to attach report schedules and monitor deadlines.";
+  const projectReminderSummary = projectForm.reminderLeadDays.trim()
+    ? `${projectForm.reminderLeadDays.trim()} days`
+    : `${settings.defaultLeadDays} days default`;
+  const reportModalTitle = reportForm.id ? "Edit Report Schedule" : "New Report Schedule";
+  const reportModalSubtitle =
+    "Add a report requirement, deadline, submission status, and reminder settings.";
+
   return (
-    <div className="space-y-5 pb-8">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-zinc-900 dark:text-white tracking-tight">
-            Report Monitoring
-          </h1>
-          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400 max-w-2xl">
-            Track project report schedules, focal persons, submissions, deadlines, and reminder readiness.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={() => navigate("/settings?tab=reports")}>
-            <Settings2 size={14} className="mr-2" /> Settings
-          </Button>
-          {can("reports.export") && (
-            <Button variant="outline" onClick={exportCsv}>
-              <Download size={14} className="mr-2" /> Export
-            </Button>
-          )}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-2">
-        {[
-          { label: "Projects", value: stats.totalProjects, hint: `${stats.activeProjects} active`, icon: FolderKanban },
-          { label: "Due Soon", value: stats.dueSoon, hint: `${settings.defaultLeadDays}-day default reminder`, icon: CalendarClock },
-          { label: "Overdue", value: stats.overdue, hint: "Past deadline", icon: AlertTriangle },
-          { label: "Submitted", value: stats.submittedThisMonth, hint: "This month", icon: CheckCircle2 },
-        ].map((card) => (
-          <div key={card.label} className="rounded-xl border border-zinc-200/90 bg-white p-3 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-                {card.label}
-              </p>
-              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-zinc-100 text-zinc-500 dark:bg-zinc-800">
-                <card.icon size={14} />
-              </div>
-            </div>
-            <p className="mt-2 text-xl font-extrabold text-zinc-900 dark:text-white">
-              {card.value.toLocaleString()}
+    <div className="-mt-3 space-y-2 pb-4 sm:-mt-5">
+      <div className="rounded-xl border border-zinc-200 bg-white px-4 py-2.5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+        <div className="flex flex-col gap-2 xl:flex-row xl:items-start xl:justify-between">
+          <div className="min-w-0">
+            <h1 className="text-[22px] font-extrabold leading-tight tracking-tight text-zinc-900 dark:text-white">
+              Report Monitoring
+            </h1>
+            <p className="mt-0.5 max-w-3xl text-[13px] text-zinc-600 dark:text-zinc-400">
+              Track project report schedules, focal persons, submissions, deadlines, and reminder readiness.
             </p>
-            <p className="mt-0.5 truncate text-[10px] text-zinc-500 dark:text-zinc-400">{card.hint}</p>
-          </div>
-        ))}
-      </div>
-
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div className="flex items-center gap-1 p-1 bg-zinc-100 dark:bg-zinc-900 rounded-xl w-fit overflow-x-auto">
-          {[
-            { id: "projects", label: "Projects", icon: FolderKanban },
-            { id: "all", label: "All Reports", icon: ClipboardCheck },
-            { id: "due-soon", label: "Due Soon", icon: Bell },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id as ViewTab)}
-              className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 whitespace-nowrap ${activeTab === tab.id ? "bg-white text-zinc-900 dark:bg-zinc-800 dark:text-white shadow-sm" : "text-zinc-500"}`}
-            >
-              <tab.icon size={14} /> {tab.label}
-            </button>
-          ))}
-        </div>
-        <div className="flex flex-col sm:flex-row gap-2">
-          {activeTab === "all" && (
-            <div className="flex items-center gap-1 p-1 bg-zinc-100 dark:bg-zinc-900 rounded-xl w-fit">
+            <div className="mt-2 flex flex-wrap gap-1.5">
               {[
-                { id: "current", label: "Current" },
-                { id: "history", label: "History" },
-                { id: "all", label: "All" },
-              ].map((scope) => (
-                <button
-                  key={scope.id}
-                  type="button"
-                  onClick={() => setRecordScope(scope.id as RecordScope)}
-                  className={`px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${recordScope === scope.id ? "bg-white text-zinc-900 dark:bg-zinc-800 dark:text-white shadow-sm" : "text-zinc-500"}`}
+                {
+                  label: "Projects",
+                  value: `${stats.totalProjects.toLocaleString()} total`,
+                  hint: `${stats.activeProjects.toLocaleString()} active`,
+                  icon: FolderKanban,
+                  chipClass:
+                    "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-500/25 dark:bg-blue-500/10 dark:text-blue-300",
+                  iconClass: "text-blue-600 dark:text-blue-300",
+                },
+                {
+                  label: "Due Soon",
+                  value: stats.dueSoon.toLocaleString(),
+                  hint: `${settings.defaultLeadDays}-day window`,
+                  icon: CalendarClock,
+                  chipClass:
+                    "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-300",
+                  iconClass: "text-amber-600 dark:text-amber-300",
+                },
+                {
+                  label: "Overdue",
+                  value: stats.overdue.toLocaleString(),
+                  hint: "Past deadline",
+                  icon: AlertTriangle,
+                  chipClass:
+                    "border-red-200 bg-red-50 text-red-700 dark:border-red-500/25 dark:bg-red-500/10 dark:text-red-300",
+                  iconClass: "text-red-600 dark:text-red-300",
+                },
+                {
+                  label: "Submitted",
+                  value: stats.submittedThisMonth.toLocaleString(),
+                  hint: "This month",
+                  icon: CheckCircle2,
+                  chipClass:
+                    "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-300",
+                  iconClass: "text-emerald-600 dark:text-emerald-300",
+                },
+              ].map((chip) => (
+                <div
+                  key={chip.label}
+                  className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] ${chip.chipClass}`}
                 >
-                  {scope.label}
-                </button>
+                  <chip.icon size={13} className={chip.iconClass} />
+                  <span className="font-bold">{chip.label}:</span>
+                  <span className="font-semibold">{chip.value}</span>
+                  <span className="opacity-75">{chip.hint}</span>
+                </div>
               ))}
             </div>
-          )}
+          </div>
+          <div className="flex flex-wrap gap-2 xl:pt-1">
+            <Button variant="outline" onClick={() => navigate("/settings?tab=reports")} className="!rounded-lg !px-3 !py-1.5 !text-xs">
+              <Settings2 size={14} className="mr-2" /> Settings
+            </Button>
+            {can("reports.export") && (
+              <Button variant="outline" onClick={exportCsv} className="!rounded-lg !px-3 !py-1.5 !text-xs">
+                <Download size={14} className="mr-2" /> Export
+              </Button>
+            )}
+          </div>
         </div>
       </div>
 
-      {activeTab === "projects" ? (
-        <Card
-          title="Project Board"
-          description="Select a project or activity to review report deadlines, due dates, submissions, and reminder readiness instantly"
-          action={can("reports.edit") && <Button variant="blue" onClick={openNewProject}><Plus size={14} className="mr-2" /> New Activity/Project</Button>}
-        >
-          {projectGroups.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-zinc-300 dark:border-zinc-700 p-8 text-center">
-              <FolderKanban size={30} className="mx-auto text-zinc-400 mb-3" />
-              <p className="text-sm font-bold text-zinc-900 dark:text-white">No project groups match this view.</p>
-              <p className="text-xs text-zinc-500 mt-1">Adjust filters or create a project and report schedule.</p>
+      <div className="rounded-xl border border-zinc-200 bg-white p-2.5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+        <div className="flex flex-col gap-2 2xl:flex-row 2xl:items-center 2xl:justify-between">
+          <div className="flex w-fit items-center gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-zinc-900">
+            {[
+              { id: "projects", label: "Projects", icon: FolderKanban },
+              { id: "all", label: "All Reports", icon: ClipboardCheck },
+              { id: "due-soon", label: "Due Soon", icon: Bell },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id as ViewTab)}
+                className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-bold uppercase tracking-wide transition-colors ${
+                  activeTab === tab.id
+                    ? "bg-white text-blue-700 shadow-sm dark:bg-zinc-800 dark:text-blue-300"
+                    : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+                }`}
+              >
+                <tab.icon size={13} /> {tab.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-1 gap-1.5 md:grid-cols-2 xl:grid-cols-5">
+            <div className="relative xl:min-w-[260px]">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+              <input
+                value={projectReportQuery}
+                onChange={(event) => setProjectReportQuery(event.target.value)}
+                placeholder="Search report..."
+                className="h-9 w-full rounded-lg border border-zinc-200 bg-white pl-9 pr-3 text-xs font-medium outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-500/10 dark:border-zinc-800 dark:bg-zinc-950"
+              />
+            </div>
+            <select
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value as ReportStatus | "all")}
+              className="h-9 rounded-lg border border-zinc-200 bg-white px-3 text-xs font-semibold outline-none focus:border-blue-300 dark:border-zinc-800 dark:bg-zinc-950"
+            >
+              <option value="all">All statuses</option>
+              <option value="submitted">Submitted</option>
+              <option value="pending">Pending</option>
+              <option value="due-soon">Due Soon</option>
+              <option value="overdue">Overdue</option>
+            </select>
+            <select
+              value={deadlineFilter}
+              onChange={(event) => setDeadlineFilter(event.target.value as typeof deadlineFilter)}
+              className="h-9 rounded-lg border border-zinc-200 bg-white px-3 text-xs font-semibold outline-none focus:border-blue-300 dark:border-zinc-800 dark:bg-zinc-950"
+            >
+              <option value="all">All due dates</option>
+              <option value="due-soon">Due soon</option>
+              <option value="overdue">Overdue</option>
+              <option value="submitted">Submitted</option>
+              <option value="no-submission">No submission</option>
+            </select>
+            <select
+              value={focalFilter}
+              onChange={(event) => setFocalFilter(event.target.value)}
+              className="h-9 rounded-lg border border-zinc-200 bg-white px-3 text-xs font-semibold outline-none focus:border-blue-300 dark:border-zinc-800 dark:bg-zinc-950"
+            >
+              <option value="all">All focal persons</option>
+              {focalFilterOptions.map((focal) => (
+                <option key={focal.id} value={focal.id}>
+                  {focal.name}
+                </option>
+              ))}
+            </select>
+            <select
+              value={projectFilter}
+              onChange={(event) => {
+                const value = event.target.value;
+                setProjectFilter(value);
+                if (value !== "all") setSelectedProjectId(value);
+              }}
+              className="h-9 rounded-lg border border-zinc-200 bg-white px-3 text-xs font-semibold outline-none focus:border-blue-300 dark:border-zinc-800 dark:bg-zinc-950"
+            >
+              <option value="all">All projects</option>
+              {visibleProjects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {activeTab === "all" && (
+          <div className="mt-2 flex w-fit items-center gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-zinc-900">
+            {[
+              { id: "current", label: "Current" },
+              { id: "history", label: "History" },
+              { id: "all", label: "All Records" },
+            ].map((scope) => (
+              <button
+                key={scope.id}
+                type="button"
+                onClick={() => setRecordScope(scope.id as RecordScope)}
+                className={`rounded-md px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wide ${
+                  recordScope === scope.id
+                    ? "bg-white text-blue-700 shadow-sm dark:bg-zinc-800 dark:text-blue-300"
+                    : "text-zinc-500"
+                }`}
+              >
+                {scope.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="grid gap-2 xl:grid-cols-[340px_minmax(0,1fr)]">
+        <aside className="rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+          <div className="border-b border-zinc-200 p-3 dark:border-zinc-800">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <h2 className="text-sm font-extrabold text-zinc-900 dark:text-white">
+                  Projects / Activities
+                </h2>
+                <p className="text-[11px] font-medium text-zinc-500">
+                  {filteredProjectGroups.length.toLocaleString()} of {projectGroups.length.toLocaleString()} shown
+                </p>
+              </div>
               {can("reports.edit") && (
-                <Button variant="blue" onClick={openNewProject} className="mt-4">
-                  <Plus size={14} className="mr-2" /> New Activity/Project
+                <Button variant="blue" onClick={openNewProject} className="!rounded-lg !px-2.5 !py-2 !text-xs">
+                  <Plus size={13} className="mr-1.5" /> New
                 </Button>
               )}
             </div>
-          ) : (
-            <div className="grid gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
-              <div className="space-y-3">
-                <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-950/60">
-                  <div className="relative">
-                    <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
-                    <input
-                      list="report-project-search-list"
-                      value={projectSearchQuery}
-                      onChange={(event) => {
-                        const value = event.target.value;
-                        setProjectSearchQuery(value);
-                        const match = projectGroups.find(
-                          (group) =>
-                            group?.project.name.toLowerCase() === value.trim().toLowerCase(),
-                        );
-                        if (match) {
-                          setSelectedProjectId(match.project.id);
-                        }
-                      }}
-                      placeholder="Search activities or projects..."
-                      className="w-full rounded-xl border border-zinc-200 bg-white py-2.5 pl-9 pr-9 text-sm outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-500/20 dark:border-zinc-800 dark:bg-zinc-950 dark:focus:border-blue-500/40"
-                    />
-                    <ChevronDown
-                      size={16}
-                      className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-zinc-700 dark:text-zinc-300"
-                    />
-                    <datalist id="report-project-search-list">
-                      {projectGroups.map((group) =>
-                        group ? <option key={group.project.id} value={group.project.name} /> : null,
-                      )}
-                    </datalist>
-                  </div>
-                  <p className="mt-2 text-[10px] font-semibold uppercase tracking-widest text-zinc-400">
-                    {filteredProjectGroups.length.toLocaleString()} of {projectGroups.length.toLocaleString()} shown
-                  </p>
-                </div>
+            <div className="relative mt-3">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+              <input
+                list="report-project-search-list"
+                value={projectSearchQuery}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setProjectSearchQuery(value);
+                  const match = projectGroups.find(
+                    (group) => group?.project.name.toLowerCase() === value.trim().toLowerCase(),
+                  );
+                  if (match) setSelectedProjectId(match.project.id);
+                }}
+                placeholder="Search projects..."
+                className="h-9 w-full rounded-lg border border-zinc-200 bg-white pl-9 pr-8 text-xs font-medium outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-500/10 dark:border-zinc-800 dark:bg-zinc-950"
+              />
+              <ChevronDown
+                size={15}
+                className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500"
+              />
+              <datalist id="report-project-search-list">
+                {projectGroups.map((group) =>
+                  group ? <option key={group.project.id} value={group.project.name} /> : null,
+                )}
+              </datalist>
+            </div>
+          </div>
 
-                <div className="space-y-3 xl:max-h-[calc(100vh-430px)] xl:overflow-y-auto xl:pr-1">
-                {filteredProjectGroups.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-zinc-300 p-6 text-center dark:border-zinc-700">
-                    <FolderKanban size={26} className="mx-auto mb-3 text-zinc-400" />
-                    <p className="text-sm font-bold text-zinc-900 dark:text-white">
-                      No activity or project found.
-                    </p>
-                    <p className="mt-1 text-xs text-zinc-500">
-                      Try a project name, focal name, or focal email.
-                    </p>
-                  </div>
-                ) : filteredProjectGroups.map((group) => {
+          <div className="max-h-[calc(100vh-320px)] min-h-[380px] overflow-y-auto">
+            {filteredProjectGroups.length === 0 ? (
+              <div className="flex min-h-[320px] flex-col items-center justify-center px-6 text-center">
+                <FolderKanban size={28} className="mb-3 text-zinc-400" />
+                <p className="text-sm font-bold text-zinc-900 dark:text-white">
+                  {projectGroups.length === 0
+                    ? "No projects or activities yet."
+                    : "No project or activity found."}
+                </p>
+                <p className="mt-1 text-xs text-zinc-500">
+                  {projectGroups.length === 0
+                    ? "Create a project/activity to start monitoring reports."
+                    : "Try a different project, focal person, or report filter."}
+                </p>
+                {can("reports.edit") && (
+                  <Button variant="blue" onClick={openNewProject} className="mt-4 !rounded-lg !px-3 !py-2 !text-xs">
+                    <Plus size={13} className="mr-1.5" /> New Activity/Project
+                  </Button>
+                )}
+              </div>
+            ) : (
+              <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                {filteredProjectGroups.map((group) => {
                   if (!group) return null;
                   const { project, focal, counts } = group;
                   const selected = selectedProjectGroup?.project.id === project.id;
                   const health =
-                    !project.active ? "gray" : counts.overdue > 0 ? "red" : counts.dueSoon > 0 ? "amber" : "green";
-                  const healthClasses: Record<string, string> = {
-                    green: "bg-emerald-500",
-                    amber: "bg-amber-500",
-                    red: "bg-red-500",
-                    gray: "bg-zinc-400",
-                  };
-                  const counterPills = [
-                    {
-                      label: "Reports",
-                      value: counts.total,
-                      className:
-                        "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300",
-                    },
-                    {
-                      label: "Due Soon",
-                      value: counts.dueSoon,
-                      className:
-                        "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300",
-                    },
-                    {
-                      label: "Overdue",
-                      value: counts.overdue,
-                      className:
-                        "border-red-200 bg-red-50 text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300",
-                    },
-                    {
-                      label: "Submitted",
-                      value: counts.submitted,
-                      className:
-                        "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300",
-                    },
-                  ];
-
+                    !project.active ? "Inactive" : counts.overdue > 0 ? "Has Overdue" : counts.dueSoon > 0 ? "Due Soon" : "Active";
+                  const healthClass =
+                    health === "Has Overdue"
+                      ? "bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-300"
+                      : health === "Due Soon"
+                        ? "bg-amber-100 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"
+                        : health === "Inactive"
+                          ? "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
+                          : "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300";
                   return (
                     <button
                       key={project.id}
                       type="button"
                       onClick={() => setSelectedProjectId(project.id)}
-                      className={`w-full rounded-2xl border p-3 text-left transition-all ${
+                      className={`grid w-full grid-cols-[minmax(0,1fr)_auto] gap-3 px-3 py-2.5 text-left transition-colors ${
                         selected
-                          ? "border-blue-300 bg-blue-50/70 shadow-sm ring-2 ring-blue-500/10 dark:border-blue-500/40 dark:bg-blue-500/10"
-                          : "border-zinc-200 bg-white hover:border-blue-200 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-blue-500/30 dark:hover:bg-zinc-900/60"
+                          ? "bg-blue-50 dark:bg-blue-500/10"
+                          : "hover:bg-zinc-50 dark:hover:bg-zinc-900/60"
                       }`}
                     >
-                      <div className="mb-2 flex flex-wrap gap-1">
-                        {counterPills.map((counter) => (
-                          <span
-                            key={counter.label}
-                            className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide ${counter.className}`}
-                          >
-                            <span>{counter.label}</span>
-                            <span>{counter.value.toLocaleString()}</span>
-                          </span>
-                        ))}
+                      <div className="min-w-0">
+                        <p className="truncate text-xs font-extrabold text-zinc-900 dark:text-white">
+                          {project.name}
+                        </p>
+                        <p className="truncate text-[11px] text-zinc-500">
+                          {focal?.position || focal?.email || "No office/unit recorded"}
+                        </p>
+                        <p className="truncate text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
+                          {focal?.name || "Focal user missing"}
+                        </p>
                       </div>
-                      <div className="flex items-start gap-3">
-                        <span className={`mt-1 h-3 w-3 shrink-0 rounded-full ${healthClasses[health]}`} />
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <h3 className="min-w-0 text-sm font-black leading-snug text-zinc-900 dark:text-white">
-                              {project.name}
-                            </h3>
-                            <Badge variant={project.active ? "success" : "default"}>
-                              {project.active ? "Active" : "Inactive"}
-                            </Badge>
-                            <Badge variant="info">{formatReportFrequency(project.defaultFrequency)}</Badge>
-                            {group.hasAttention && <Badge variant="warning">Attention Required</Badge>}
-                          </div>
-                          <div className="mt-3 grid gap-2 text-xs">
-                            <div>
-                              <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
-                                Focal Name
-                              </p>
-                              <p className="truncate font-bold text-zinc-800 dark:text-zinc-100">
-                                {focal?.name || "Focal user missing"}
-                              </p>
-                            </div>
-                            <div>
-                              <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
-                                Email
-                              </p>
-                              <p className="truncate font-medium text-zinc-500 dark:text-zinc-400">
-                                {focal?.email || "No email available"}
-                              </p>
-                            </div>
-                            <div className="grid grid-cols-2 gap-2">
-                              <div>
-                                <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
-                                  Next Deadline
-                                </p>
-                                <p className="font-bold text-zinc-800 dark:text-zinc-100">
-                                  {formatReportDate(group.nextDeadline)}
-                                </p>
-                              </div>
-                              <div>
-                                <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
-                                  Lead Days
-                                </p>
-                                <p className="font-bold text-zinc-800 dark:text-zinc-100">
-                                  {project.reminderLeadDays ?? settings.defaultLeadDays} days
-                                </p>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
+                      <div className="flex min-w-[92px] flex-col items-end gap-1">
+                        <span className={`rounded-full px-2 py-0.5 text-[9px] font-bold uppercase ${healthClass}`}>
+                          {health}
+                        </span>
+                        <span className="text-[11px] font-bold text-zinc-700 dark:text-zinc-300">
+                          {counts.total.toLocaleString()} reports
+                        </span>
+                        <span className="text-[10px] text-zinc-500">
+                          {counts.overdue} overdue / {counts.dueSoon} soon
+                        </span>
                       </div>
                     </button>
                   );
                 })}
-                </div>
               </div>
+            )}
+          </div>
+        </aside>
 
-              {selectedProjectGroup ? (
-                <section className="min-w-0 rounded-2xl border border-zinc-200 bg-zinc-50/70 p-4 dark:border-zinc-800 dark:bg-zinc-950/40">
-                  <div className="flex flex-col gap-4 border-b border-zinc-200 pb-4 dark:border-zinc-800 lg:flex-row lg:items-start lg:justify-between">
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="text-xl font-black leading-tight text-zinc-900 dark:text-white">
-                          {selectedProjectGroup.project.name}
-                        </h3>
-                        <Badge variant={selectedProjectGroup.project.active ? "success" : "default"}>
-                          {selectedProjectGroup.project.active ? "Active" : "Inactive"}
-                        </Badge>
-                        <Badge variant="info">
-                          {formatReportFrequency(selectedProjectGroup.project.defaultFrequency)}
-                        </Badge>
-                        {selectedProjectGroup.hasAttention && (
-                          <Badge variant="warning">Attention Required</Badge>
-                        )}
-                      </div>
-                      <div className="mt-3 grid gap-3 text-xs sm:grid-cols-2 xl:grid-cols-4">
-                        <div>
-                          <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
-                            Focal Name
-                          </p>
-                          <p className="font-bold text-zinc-900 dark:text-white">
-                            {selectedProjectGroup.focal?.name || "Focal user missing"}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
-                            Email
-                          </p>
-                          <p className="truncate font-medium text-zinc-600 dark:text-zinc-300">
-                            {selectedProjectGroup.focal?.email || "No email available"}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
-                            Next Deadline
-                          </p>
-                          <p className="font-bold text-zinc-900 dark:text-white">
-                            {formatReportDate(selectedProjectGroup.nextDeadline)}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
-                            Lead Days
-                          </p>
-                          <p className="font-bold text-zinc-900 dark:text-white">
-                            {selectedProjectGroup.project.reminderLeadDays ?? settings.defaultLeadDays} days
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {can("reports.edit") && (
-                        <>
-                          <Button variant="blue" onClick={() => openNewReportForProject(selectedProjectGroup.project)}>
-                            <Plus size={14} className="mr-2" /> Add Report to Project
-                          </Button>
-                          <Button variant="outline" onClick={() => openEditProject(selectedProjectGroup.project)}>
-                            <Edit3 size={14} className="mr-2" /> Edit Project
-                          </Button>
-                        </>
-                      )}
-                      {can("reports.delete") && (
-                        <Button variant="outline" onClick={() => deleteProject(selectedProjectGroup.project)}>
-                          <Trash2 size={14} className="mr-2" /> Delete Project
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-
-                  {selectedProjectGroup.project.notes && (
-                    <p className="mt-4 rounded-xl border border-zinc-200 bg-white p-3 text-xs leading-relaxed text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-400">
-                      {selectedProjectGroup.project.notes}
-                    </p>
+        <section className="min-w-0 rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+          <div className="border-b border-zinc-200 p-3 dark:border-zinc-800">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="truncate text-sm font-extrabold text-zinc-900 dark:text-white">
+                    {rightPanelTitle}
+                  </h2>
+                  {activeTab === "projects" && selectedProjectGroup && (
+                    <>
+                      <Badge variant={selectedProjectGroup.project.active ? "success" : "default"}>
+                        {selectedProjectGroup.project.active ? "Active" : "Inactive"}
+                      </Badge>
+                      <Badge variant="info">
+                        {formatReportFrequency(selectedProjectGroup.project.defaultFrequency)}
+                      </Badge>
+                      {selectedProjectGroup.hasAttention && <Badge variant="warning">Attention Required</Badge>}
+                    </>
                   )}
-
-                  <div className="mt-4 space-y-3">
-                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                      <div className="flex items-center gap-1 rounded-xl border border-zinc-200 bg-white p-1 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-                        {[
-                          {
-                            id: "active" as ProjectReportView,
-                            label: "Active",
-                            count: selectedProjectGroup.currentRows.length,
-                          },
-                          {
-                            id: "history" as ProjectReportView,
-                            label: "History",
-                            count: selectedProjectGroup.historyRows.length,
-                          },
-                        ]
-                          .filter((option) => activeTab !== "due-soon" || option.id === "active")
-                          .map((option) => (
-                            <button
-                              key={option.id}
-                              type="button"
-                              onClick={() => setProjectReportView(option.id)}
-                              className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-[10px] font-black uppercase tracking-widest transition-all ${
-                                projectReportView === option.id
-                                  ? "border-blue-300 bg-blue-50 text-blue-700 ring-2 ring-blue-500/10 dark:border-sky-400/70 dark:bg-sky-400/20 dark:text-sky-100 dark:ring-sky-400/15"
-                                  : "border-transparent text-zinc-500 hover:border-zinc-200 hover:bg-zinc-50 hover:text-zinc-800 dark:text-zinc-400 dark:hover:border-zinc-700 dark:hover:bg-zinc-900 dark:hover:text-zinc-100"
-                              }`}
-                            >
-                              <span>{option.label}</span>
-                              <span
-                                className={`rounded-full px-1.5 py-0.5 text-[9px] leading-none ${
-                                  projectReportView === option.id
-                                    ? "bg-blue-600 text-white dark:bg-sky-300 dark:text-slate-950"
-                                    : "bg-zinc-200 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
-                                }`}
-                              >
-                                {option.count.toLocaleString()}
-                              </span>
-                            </button>
-                          ))}
-                      </div>
-                      <div className="relative w-full lg:w-80">
-                        <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
-                        <input
-                          value={projectReportQuery}
-                          onChange={(event) => setProjectReportQuery(event.target.value)}
-                          placeholder="Search this project reports..."
-                          className="w-full rounded-xl border border-zinc-200 bg-white py-2.5 pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-zinc-800 dark:bg-zinc-950"
-                        />
-                      </div>
-                    </div>
-
-                    {renderReportCards(visibleProjectRows)}
+                </div>
+                {activeTab === "projects" && selectedProjectGroup ? (
+                  <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-zinc-500">
+                    <span><strong className="text-zinc-700 dark:text-zinc-300">Focal:</strong> {selectedProjectGroup.focal?.name || "Focal user missing"}</span>
+                    <span><strong className="text-zinc-700 dark:text-zinc-300">Office/Unit:</strong> {selectedProjectGroup.focal?.position || "Not recorded"}</span>
+                    <span><strong className="text-zinc-700 dark:text-zinc-300">Next Deadline:</strong> {formatReportDate(selectedProjectGroup.nextDeadline)}</span>
+                    <span><strong className="text-zinc-700 dark:text-zinc-300">Lead:</strong> {selectedProjectGroup.project.reminderLeadDays ?? settings.defaultLeadDays} days</span>
                   </div>
-                </section>
-              ) : null}
+                ) : (
+                  <p className="mt-1 text-xs text-zinc-500">
+                    {activeTab === "due-soon"
+                      ? "Current reports approaching deadline or already overdue."
+                      : "Submission dates, deadlines, reminder windows, and focal person readiness."}
+                  </p>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {activeTab === "projects" && selectedProjectGroup && can("reports.edit") && (
+                  <>
+                    <Button variant="blue" onClick={() => openNewReportForProject(selectedProjectGroup.project)} className="!rounded-lg !px-3 !py-2 !text-xs">
+                      <Plus size={13} className="mr-1.5" /> Add Report
+                    </Button>
+                    <Button variant="outline" onClick={() => openEditProject(selectedProjectGroup.project)} className="!rounded-lg !px-3 !py-2 !text-xs">
+                      <Edit3 size={13} className="mr-1.5" /> Edit Project
+                    </Button>
+                  </>
+                )}
+                {activeTab === "projects" && selectedProjectGroup && can("reports.delete") && (
+                  <Button variant="outline" onClick={() => deleteProject(selectedProjectGroup.project)} className="!rounded-lg !px-3 !py-2 !text-xs">
+                    <Trash2 size={13} className="mr-1.5" /> Delete
+                  </Button>
+                )}
+                {activeTab === "all" && can("reports.edit") && (
+                  <Button variant="blue" onClick={openNewReport} disabled={visibleProjects.length === 0} className="!rounded-lg !px-3 !py-2 !text-xs">
+                    <Plus size={13} className="mr-1.5" /> Add Report
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            {activeTab === "projects" && selectedProjectGroup && (
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-zinc-900">
+                  {[
+                    { id: "active" as ProjectReportView, label: "Active", count: selectedProjectGroup.currentRows.length },
+                    { id: "history" as ProjectReportView, label: "History", count: selectedProjectGroup.historyRows.length },
+                  ].map((option) => (
+                    <button
+                      key={option.id}
+                      type="button"
+                      onClick={() => setProjectReportView(option.id)}
+                      className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wide ${
+                        projectReportView === option.id
+                          ? "bg-white text-blue-700 shadow-sm dark:bg-zinc-800 dark:text-blue-300"
+                          : "text-zinc-500"
+                      }`}
+                    >
+                      {option.label}
+                      <span className="rounded-full bg-zinc-200 px-1.5 py-0.5 text-[9px] text-zinc-700 dark:bg-zinc-700 dark:text-zinc-200">
+                        {option.count.toLocaleString()}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                {selectedProjectGroup.project.notes && (
+                  <p className="max-w-2xl truncate text-xs text-zinc-500">
+                    {selectedProjectGroup.project.notes}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+
+          {selectedProjectGroup || activeTab !== "projects" ? (
+            <div className="p-3">
+              {renderReportRows(rightPanelRows, { showProject: activeTab !== "projects" })}
+            </div>
+          ) : (
+            <div className="flex min-h-[360px] flex-col items-center justify-center px-6 text-center">
+              <ClipboardCheck size={30} className="mb-3 text-zinc-400" />
+              <p className="text-sm font-bold text-zinc-900 dark:text-white">
+                Select a project/activity or create a new one to start monitoring reports.
+              </p>
+              {can("reports.edit") && (
+                <Button variant="blue" onClick={openNewProject} className="mt-4 !rounded-lg !px-3 !py-2 !text-xs">
+                  <Plus size={13} className="mr-1.5" /> New Activity/Project
+                </Button>
+              )}
             </div>
           )}
-        </Card>
-      ) : (
-        <Card
-          title={activeTab === "due-soon" ? "Due Soon Reports" : "All Report Schedules"}
-          description={
-            activeTab === "due-soon"
-              ? "Current reports approaching deadline or already overdue, sorted by nearest deadline"
-              : "Submission dates, deadlines, reminder windows, and focal person readiness"
-          }
-          action={
-            activeTab === "all" &&
-            can("reports.edit") && (
-              <Button variant="blue" onClick={openNewReport} disabled={visibleProjects.length === 0}>
-                <Plus size={14} className="mr-2" /> Add Report
-              </Button>
-            )
-          }
-        >
-          {renderReportRows(reportRows, { showProject: true })}
-        </Card>
-      )}
+        </section>
+      </div>
 
       <Modal
         isOpen={isProjectModalOpen}
         onClose={() => setIsProjectModalOpen(false)}
-        title={projectForm.id ? "Edit Activity/Project" : "New Activity/Project"}
-        footer={<><Button variant="ghost" onClick={() => setIsProjectModalOpen(false)}>Cancel</Button><Button variant="blue" onClick={saveProject}>Save Activity/Project</Button></>}
+        title={
+          <span className="block">
+            <span className="block text-lg font-extrabold text-zinc-900 dark:text-white">
+              {projectModalTitle}
+            </span>
+            <span className="mt-1 block text-xs font-medium leading-relaxed text-zinc-500 dark:text-zinc-400">
+              {projectModalSubtitle}
+            </span>
+          </span>
+        }
+        maxWidth="max-w-2xl"
+        className={modalShellClass}
+        headerClassName={modalHeaderClass}
+        titleClassName={modalTitleClass}
+        bodyClassName={modalBodyClass}
+        footerClassName={modalFooterClass}
+        closeButtonClassName={modalCloseClass}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setIsProjectModalOpen(false)} className="!rounded-lg !px-3 !py-2 !text-xs">Cancel</Button>
+            <Button variant="blue" onClick={saveProject} className="!rounded-lg !px-3 !py-2 !text-xs">Save Activity/Project</Button>
+          </>
+        }
       >
-        <div className="space-y-4">
-          <Input label="Activity/Project Name" value={projectForm.name} onChange={(event) => setProjectForm({ ...projectForm, name: event.target.value })} />
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest ml-1">Focal Person</label>
-              <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-2.5 text-sm font-semibold text-zinc-800 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-100">
-                {usersById.get(projectForm.focalUserId)?.name || currentUser?.name || "Your account"}
+        <div className="space-y-5">
+          {projectForm.id && (
+            <div className="flex flex-wrap gap-1.5 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-300">
+              <span>{projectForm.active ? "Active Project" : "Inactive Project"}</span>
+              <span className="text-zinc-300">/</span>
+              <span>{formatReportFrequency(projectForm.defaultFrequency)}</span>
+              <span className="text-zinc-300">/</span>
+              <span>Reminder: {projectReminderSummary}</span>
+            </div>
+          )}
+
+          <section className="space-y-3">
+            <p className={sectionTitleClass}>Activity Details</p>
+            <Input
+              label="Activity/Project Name"
+              value={projectForm.name}
+              onChange={(event) => setProjectForm({ ...projectForm, name: event.target.value })}
+              className={fieldClass}
+            />
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <label className={fieldLabelClass}>Focal Person</label>
+                <div className="flex h-10 items-center rounded-lg border border-zinc-300 bg-zinc-50 px-3 text-[13px] font-semibold text-zinc-800 dark:border-zinc-700 dark:bg-zinc-900/50 dark:text-zinc-100">
+                  {usersById.get(projectForm.focalUserId)?.name || currentUser?.name || "Your account"}
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <label className={fieldLabelClass}>Default Frequency</label>
+                <select
+                  value={projectForm.defaultFrequency}
+                  onChange={(event) => setProjectForm({ ...projectForm, defaultFrequency: event.target.value as ReportFrequency })}
+                  className={selectClass}
+                >
+                  {REPORT_FREQUENCY_OPTIONS.map((frequency) => <option key={frequency} value={frequency}>{formatReportFrequency(frequency)}</option>)}
+                </select>
               </div>
             </div>
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest ml-1">Default Frequency</label>
-              <select value={projectForm.defaultFrequency} onChange={(event) => setProjectForm({ ...projectForm, defaultFrequency: event.target.value as ReportFrequency })} className="w-full bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2.5 text-sm outline-none">
-                {REPORT_FREQUENCY_OPTIONS.map((frequency) => <option key={frequency} value={frequency}>{formatReportFrequency(frequency)}</option>)}
-              </select>
+          </section>
+
+          <section className="space-y-3">
+            <p className={sectionTitleClass}>Default Monitoring Settings</p>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Input
+                label="Reminder Override Days"
+                type="number"
+                min={0}
+                placeholder={`${settings.defaultLeadDays} default`}
+                value={projectForm.reminderLeadDays}
+                onChange={(event) => setProjectForm({ ...projectForm, reminderLeadDays: event.target.value })}
+                className={fieldClass}
+              />
+              <label className="mt-[21px] flex min-h-10 cursor-pointer items-center gap-3 rounded-lg border border-zinc-300 bg-white px-3 py-2 transition-colors hover:border-blue-300 hover:bg-blue-50/40 dark:border-zinc-700 dark:bg-zinc-950 dark:hover:border-blue-500/40 dark:hover:bg-blue-500/10">
+                <input
+                  type="checkbox"
+                  checked={projectForm.active}
+                  onChange={(event) => setProjectForm({ ...projectForm, active: event.target.checked })}
+                  className="h-4 w-4 rounded border-zinc-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span className="min-w-0">
+                  <span className="block text-[13px] font-bold text-zinc-900 dark:text-white">Active project</span>
+                  <span className="block text-[11px] text-zinc-500 dark:text-zinc-400">Include this activity in monitoring counts.</span>
+                </span>
+              </label>
             </div>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Input label="Reminder Override Days" type="number" min={0} placeholder={`${settings.defaultLeadDays} default`} value={projectForm.reminderLeadDays} onChange={(event) => setProjectForm({ ...projectForm, reminderLeadDays: event.target.value })} />
-            <label className="flex items-center gap-3 mt-6 rounded-xl border border-zinc-200 dark:border-zinc-800 p-3 cursor-pointer">
-              <input type="checkbox" checked={projectForm.active} onChange={(event) => setProjectForm({ ...projectForm, active: event.target.checked })} className="w-4 h-4 rounded text-blue-600" />
-              <span className="text-sm font-bold text-zinc-900 dark:text-white">Active project</span>
-            </label>
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-[11px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest ml-1">Notes</label>
-            <textarea value={projectForm.notes} onChange={(event) => setProjectForm({ ...projectForm, notes: event.target.value })} rows={3} className="w-full bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2.5 text-sm outline-none resize-none" />
-          </div>
+          </section>
+
+          <section className="space-y-3">
+            <p className={sectionTitleClass}>Notes</p>
+            <div className="space-y-1.5">
+              <label className={fieldLabelClass}>Notes</label>
+              <textarea
+                value={projectForm.notes}
+                onChange={(event) => setProjectForm({ ...projectForm, notes: event.target.value })}
+                rows={3}
+                className={textareaClass}
+              />
+            </div>
+          </section>
         </div>
       </Modal>
 
       <Modal
         isOpen={isReportModalOpen}
         onClose={() => setIsReportModalOpen(false)}
-        title={reportForm.id ? "Edit Report Schedule" : "New Report Schedule"}
+        title={
+          <span className="block">
+            <span className="block text-lg font-extrabold text-zinc-900 dark:text-white">
+              {reportModalTitle}
+            </span>
+            <span className="mt-1 block text-xs font-medium leading-relaxed text-zinc-500 dark:text-zinc-400">
+              {reportModalSubtitle}
+            </span>
+          </span>
+        }
+        maxWidth="max-w-3xl"
+        className={modalShellClass}
+        headerClassName={modalHeaderClass}
+        titleClassName={modalTitleClass}
+        bodyClassName={modalBodyClass}
+        footerClassName={modalFooterClass}
+        closeButtonClassName={modalCloseClass}
         footer={
           <>
             {isSuperAdmin && reportForm.id && (
@@ -1561,46 +1736,106 @@ export const ReportMonitoringPage: React.FC = () => {
                   if (row) void sendManualTestReminder(row);
                 }}
                 disabled={manualSendingReportId === reportForm.id}
-                className="mr-auto"
+                className="mr-auto !rounded-lg !px-3 !py-2 !text-xs"
               >
                 <Send size={14} className="mr-2" /> Send Test Reminder
               </Button>
             )}
-            <Button variant="ghost" onClick={() => setIsReportModalOpen(false)}>Cancel</Button>
-            <Button variant="blue" onClick={saveReport}>Save Report</Button>
+            <Button variant="ghost" onClick={() => setIsReportModalOpen(false)} className="!rounded-lg !px-3 !py-2 !text-xs">Cancel</Button>
+            <Button variant="blue" onClick={saveReport} className="!rounded-lg !px-3 !py-2 !text-xs">Save Report</Button>
           </>
         }
       >
-        <div className="space-y-4">
-          <div className="space-y-1.5">
-            <label className="text-[11px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest ml-1">Project</label>
-            <select value={reportForm.projectId} onChange={(event) => {
-              const project = projectsById.get(event.target.value);
-              setReportForm({ ...reportForm, projectId: event.target.value, frequency: project?.defaultFrequency || reportForm.frequency });
-            }} className="w-full bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2.5 text-sm outline-none">
-              <option value="">Select project</option>
-              {visibleProjects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
-            </select>
-          </div>
-          <Input label="Report Title" value={reportForm.title} onChange={(event) => setReportForm({ ...reportForm, title: event.target.value })} />
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Input label="Report Period" placeholder="e.g. January 2026, Q1 2026" value={reportForm.period} onChange={(event) => setReportForm({ ...reportForm, period: event.target.value })} />
+        <div className="space-y-5">
+          <section className="space-y-3">
+            <p className={sectionTitleClass}>Project and Report Details</p>
             <div className="space-y-1.5">
-              <label className="text-[11px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest ml-1">Frequency</label>
-              <select value={reportForm.frequency} onChange={(event) => setReportForm({ ...reportForm, frequency: event.target.value as ReportFrequency })} className="w-full bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2.5 text-sm outline-none">
-                {REPORT_FREQUENCY_OPTIONS.map((frequency) => <option key={frequency} value={frequency}>{formatReportFrequency(frequency)}</option>)}
+              <label className={fieldLabelClass}>Project</label>
+              <select
+                value={reportForm.projectId}
+                onChange={(event) => {
+                  const project = projectsById.get(event.target.value);
+                  setReportForm({ ...reportForm, projectId: event.target.value, frequency: project?.defaultFrequency || reportForm.frequency });
+                }}
+                className={selectClass}
+              >
+                <option value="">Select project</option>
+                {visibleProjects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
               </select>
             </div>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <Input label="Deadline" type="date" value={reportForm.deadline} onChange={(event) => setReportForm({ ...reportForm, deadline: event.target.value })} />
-            <Input label="Submitted Date" type="date" value={reportForm.submittedDate} onChange={(event) => setReportForm({ ...reportForm, submittedDate: event.target.value })} />
-            <Input label="Reminder Override" type="number" min={0} placeholder={`${settings.defaultLeadDays} default`} value={reportForm.reminderLeadDays} onChange={(event) => setReportForm({ ...reportForm, reminderLeadDays: event.target.value })} />
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-[11px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest ml-1">Remarks</label>
-            <textarea value={reportForm.remarks} onChange={(event) => setReportForm({ ...reportForm, remarks: event.target.value })} rows={3} className="w-full bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2.5 text-sm outline-none resize-none" />
-          </div>
+            <Input
+              label="Report Title"
+              value={reportForm.title}
+              onChange={(event) => setReportForm({ ...reportForm, title: event.target.value })}
+              className={fieldClass}
+            />
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Input
+                label="Report Period"
+                placeholder="e.g. January 2026, Q1 2026"
+                value={reportForm.period}
+                onChange={(event) => setReportForm({ ...reportForm, period: event.target.value })}
+                className={fieldClass}
+              />
+              <div className="space-y-1.5">
+                <label className={fieldLabelClass}>Frequency</label>
+                <select
+                  value={reportForm.frequency}
+                  onChange={(event) => setReportForm({ ...reportForm, frequency: event.target.value as ReportFrequency })}
+                  className={selectClass}
+                >
+                  {REPORT_FREQUENCY_OPTIONS.map((frequency) => <option key={frequency} value={frequency}>{formatReportFrequency(frequency)}</option>)}
+                </select>
+              </div>
+            </div>
+          </section>
+
+          <section className="space-y-3">
+            <p className={sectionTitleClass}>Schedule and Submission Details</p>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <Input
+                label="Deadline"
+                type="date"
+                value={reportForm.deadline}
+                onChange={(event) => setReportForm({ ...reportForm, deadline: event.target.value })}
+                className={fieldClass}
+              />
+              <Input
+                label="Submitted Date"
+                type="date"
+                value={reportForm.submittedDate}
+                onChange={(event) => setReportForm({ ...reportForm, submittedDate: event.target.value })}
+                className={fieldClass}
+              />
+              <Input
+                label="Reminder Override"
+                type="number"
+                min={0}
+                placeholder={`${settings.defaultLeadDays} default`}
+                value={reportForm.reminderLeadDays}
+                onChange={(event) => setReportForm({ ...reportForm, reminderLeadDays: event.target.value })}
+                className={fieldClass}
+              />
+            </div>
+            <div className="grid gap-2 text-[11px] text-zinc-500 sm:grid-cols-3 dark:text-zinc-400">
+              <p>Deadline determines due soon and overdue status.</p>
+              <p>Submitted date marks the report as submitted.</p>
+              <p>Reminder override changes this report's reminder window.</p>
+            </div>
+          </section>
+
+          <section className="space-y-3">
+            <p className={sectionTitleClass}>Remarks</p>
+            <div className="space-y-1.5">
+              <label className={fieldLabelClass}>Remarks</label>
+              <textarea
+                value={reportForm.remarks}
+                onChange={(event) => setReportForm({ ...reportForm, remarks: event.target.value })}
+                rows={3}
+                className={textareaClass}
+              />
+            </div>
+          </section>
         </div>
       </Modal>
 
