@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import type { Range } from "xlsx-js-style";
 import {
   AlertTriangle,
   Bell,
@@ -9,6 +10,7 @@ import {
   ClipboardCheck,
   Download,
   Edit3,
+  FileSpreadsheet,
   FilePlus2,
   FolderKanban,
   MailCheck,
@@ -523,6 +525,14 @@ export const ReportMonitoringPage: React.FC = () => {
   const filteredVisibleProjectRows = applyReportFilters(visibleProjectRows, false);
   const filteredReportRows = applyReportFilters(reportRows, true);
   const rightPanelRows = activeTab === "projects" ? filteredVisibleProjectRows : filteredReportRows;
+  const summaryExportRows =
+    activeTab === "projects"
+      ? filteredProjectGroups.flatMap((group) => {
+          if (!group) return [];
+          const rows = projectReportView === "history" ? group.historyRows : group.currentRows;
+          return applyReportFilters(rows, false);
+        })
+      : rightPanelRows;
   const rightPanelTitle =
     activeTab === "projects"
       ? selectedProjectGroup?.project.name || "Project Reports"
@@ -885,6 +895,225 @@ export const ReportMonitoringPage: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
+  const exportSummaryExcel = async () => {
+    const rows = summaryExportRows;
+    if (rows.length === 0) {
+      toast("warning", "No report rows to export.");
+      return;
+    }
+
+    const XLSXStyle = await import("xlsx-js-style");
+    const XLSX =
+      (XLSXStyle as unknown as { default?: typeof XLSXStyle }).default || XLSXStyle;
+
+    const groupedRows = new Map<string, { projectName: string; rows: ReportRow[] }>();
+    for (const row of rows) {
+      const projectKey = row.project?.id || row.report.projectId || "missing-project";
+      const projectName = row.project?.name || "Missing project";
+      const group = groupedRows.get(projectKey);
+      if (group) {
+        group.rows.push(row);
+      } else {
+        groupedRows.set(projectKey, { projectName, rows: [row] });
+      }
+    }
+
+    const headerRowCount = 3;
+    const generatedDate = new Date().toLocaleDateString("en-PH", {
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    });
+    const sheetRows: Array<Array<string>> = [
+      ["REPORT MONITORING SUMMARY"],
+      [`Generated on ${generatedDate}`],
+      [],
+    ];
+    const merges: Range[] = [];
+
+    for (const group of groupedRows.values()) {
+      const titleRowIndex = sheetRows.length;
+      const titleRow = ["Project/Activity"];
+      const labelRow = [group.projectName];
+      const valueRow = [""];
+
+      group.rows.forEach((row, index) => {
+        const startColumn = 1 + index * 2;
+        titleRow[startColumn] = row.report.title;
+        titleRow[startColumn + 1] = "";
+        labelRow[startColumn] = "Deadline";
+        labelRow[startColumn + 1] = "Date Submitted";
+        valueRow[startColumn] = formatReportDate(row.report.deadline);
+        valueRow[startColumn + 1] = row.report.submittedDate
+          ? formatReportDate(row.report.submittedDate)
+          : "Not submitted";
+        merges.push({
+          s: { r: titleRowIndex, c: startColumn },
+          e: { r: titleRowIndex, c: startColumn + 1 },
+        });
+      });
+
+      sheetRows.push(titleRow, labelRow, valueRow, []);
+    }
+
+    const maxColumnCount = Math.max(1, ...sheetRows.map((row) => row.length));
+    sheetRows[0] = [
+      sheetRows[0][0],
+      ...Array.from({ length: maxColumnCount - 1 }, () => ""),
+    ];
+    sheetRows[1] = [
+      sheetRows[1][0],
+      ...Array.from({ length: maxColumnCount - 1 }, () => ""),
+    ];
+    merges.unshift(
+      {
+        s: { r: 0, c: 0 },
+        e: { r: 0, c: maxColumnCount - 1 },
+      },
+      {
+        s: { r: 1, c: 0 },
+        e: { r: 1, c: maxColumnCount - 1 },
+      },
+    );
+
+    const worksheet = XLSX.utils.aoa_to_sheet(sheetRows);
+    worksheet["!merges"] = merges;
+    worksheet["!cols"] = [
+      { wch: 24 },
+      ...Array.from({ length: maxColumnCount - 1 }, () => ({
+        wch: 18,
+      })),
+    ];
+    worksheet["!rows"] = sheetRows.map((_, index) => {
+      if (index === 0) return { hpt: 30 };
+      if (index === 1) return { hpt: 21 };
+      if (index === 2) return { hpt: 8 };
+      const blockRow = (index - headerRowCount) % 4;
+      return { hpt: blockRow === 3 ? 8 : blockRow === 0 ? 24 : 21 };
+    });
+
+    const tableBorder = {
+      top: { style: "thin", color: { rgb: "D6DEE8" } },
+      right: { style: "thin", color: { rgb: "D6DEE8" } },
+      bottom: { style: "thin", color: { rgb: "D6DEE8" } },
+      left: { style: "thin", color: { rgb: "D6DEE8" } },
+    };
+    const baseCellStyle = {
+      alignment: {
+        horizontal: "center",
+        vertical: "center",
+        wrapText: true,
+      },
+      border: tableBorder,
+      font: {
+        name: "Calibri",
+        sz: 11,
+        color: { rgb: "111827" },
+      },
+    };
+
+    sheetRows.forEach((row, rowIndex) => {
+      if (rowIndex < 2) {
+        for (let columnIndex = 0; columnIndex < maxColumnCount; columnIndex += 1) {
+          const cellAddress = XLSX.utils.encode_cell({ r: rowIndex, c: columnIndex });
+          const cell = worksheet[cellAddress] || { t: "s", v: "" };
+          const isTitle = rowIndex === 0;
+
+          cell.s = {
+            alignment: {
+              horizontal: "center",
+              vertical: "center",
+              wrapText: true,
+            },
+            border: tableBorder,
+            font: {
+              name: "Calibri",
+              sz: isTitle ? 16 : 11,
+              bold: isTitle,
+              italic: !isTitle,
+              color: { rgb: isTitle ? "1E3A8A" : "475569" },
+            },
+            fill: {
+              patternType: "solid",
+              fgColor: { rgb: isTitle ? "EAF2FF" : "F8FAFC" },
+            },
+          };
+          worksheet[cellAddress] = cell;
+        }
+        return;
+      }
+      if (rowIndex === 2) return;
+
+      const blockRow = (rowIndex - headerRowCount) % 4;
+      if (blockRow === 3) return;
+
+      row.forEach((_value, columnIndex) => {
+        const cellAddress = XLSX.utils.encode_cell({ r: rowIndex, c: columnIndex });
+        const cell = worksheet[cellAddress] || { t: "s", v: "" };
+        const isProjectColumn = columnIndex === 0;
+        const isTitleRow = blockRow === 0;
+        const isLabelRow = blockRow === 1;
+        const isValueRow = blockRow === 2;
+
+        cell.s = {
+          ...baseCellStyle,
+          font: {
+            ...baseCellStyle.font,
+            bold: isTitleRow || isLabelRow || isProjectColumn,
+            color: {
+              rgb: isTitleRow
+                ? "1E3A8A"
+                : isValueRow && cell.v === "Not submitted"
+                  ? "991B1B"
+                  : "111827",
+            },
+          },
+          fill: {
+            patternType: "solid",
+            fgColor: {
+              rgb: isTitleRow
+                ? isProjectColumn
+                  ? "DCEBFF"
+                  : "EAF2FF"
+                : isLabelRow
+                  ? isProjectColumn
+                    ? "F1F7FF"
+                    : "F8FBFF"
+                  : isProjectColumn
+                    ? "F8FAFC"
+                    : cell.v === "Not submitted"
+                      ? "FEE2E2"
+                      : "FFFFFF",
+            },
+          },
+        };
+        worksheet[cellAddress] = cell;
+      });
+    });
+
+    for (const merge of merges) {
+      const cellAddress = XLSX.utils.encode_cell(merge.s);
+      const cell = worksheet[cellAddress];
+      if (cell && typeof cell === "object") {
+        cell.s = {
+          ...cell.s,
+          alignment: {
+            horizontal: "center",
+            vertical: "center",
+            wrapText: true,
+          },
+        };
+      }
+    }
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Summary");
+    XLSX.writeFile(
+      workbook,
+      `report-monitoring-summary-${new Date().toISOString().slice(0, 10)}.xlsx`,
+    );
+  };
+
   const renderSubmittedCell = (report: ReportSubmission) =>
     can("reports.edit") ? (
       <button
@@ -1245,9 +1474,14 @@ export const ReportMonitoringPage: React.FC = () => {
               <Settings2 size={14} className="mr-2" /> Settings
             </Button>
             {can("reports.export") && (
-              <Button variant="outline" onClick={exportCsv} className="!rounded-lg !px-3 !py-1.5 !text-xs">
-                <Download size={14} className="mr-2" /> Export
-              </Button>
+              <>
+                <Button variant="outline" onClick={exportSummaryExcel} className="!rounded-lg !px-3 !py-1.5 !text-xs">
+                  <FileSpreadsheet size={14} className="mr-2" /> Summary Excel
+                </Button>
+                <Button variant="outline" onClick={exportCsv} className="!rounded-lg !px-3 !py-1.5 !text-xs">
+                  <Download size={14} className="mr-2" /> Export
+                </Button>
+              </>
             )}
           </div>
         </div>
