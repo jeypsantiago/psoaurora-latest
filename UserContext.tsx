@@ -10,7 +10,11 @@ import {
   hydrateManagedStateToLocalStorage,
   installLocalStateBridge,
 } from './services/localStateBridge';
-import { SecureWorkspaceBootstrap } from './components/SecureWorkspaceBootstrap';
+import {
+  clearFastLoginSession,
+  readFastLoginSession,
+  writeFastLoginSession,
+} from './services/fastLoginCache';
 
 export interface Role {
   id: string;
@@ -125,6 +129,29 @@ const ensureDefaultRoles = (roles: Role[]): Role[] => {
 };
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
+
+const runWhenIdle = (callback: () => void, timeout = 2000): (() => void) => {
+  if (typeof window === 'undefined') {
+    callback();
+    return () => undefined;
+  }
+
+  const browserWindow = window as Window & {
+    requestIdleCallback?: (
+      callback: () => void,
+      options?: { timeout?: number },
+    ) => number;
+    cancelIdleCallback?: (handle: number) => void;
+  };
+
+  if (typeof browserWindow.requestIdleCallback === 'function') {
+    const idleId = browserWindow.requestIdleCallback(callback, { timeout });
+    return () => browserWindow.cancelIdleCallback?.(idleId);
+  }
+
+  const timeoutId = window.setTimeout(callback, Math.min(timeout, 1000));
+  return () => window.clearTimeout(timeoutId);
+};
 
 const extractSingleFileName = (value: unknown): string => {
   if (typeof value === 'string') return value;
@@ -247,10 +274,15 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const record = backend.authStore.record;
     if (!backend.authStore.isValid || !record) {
       setCurrentUser(null);
-      return;
+      return null;
     }
 
-    setCurrentUser(fromAuthRecord(record));
+    const mapped = fromAuthRecord(record);
+    setCurrentUser(mapped);
+    setUsers((prev) => (
+      prev.some((user) => user.id === mapped.id) ? prev : [mapped, ...prev]
+    ));
+    return mapped;
   }, []);
 
   const bootstrap = useCallback(async () => {
@@ -273,11 +305,20 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const ownerId = String(backend.authStore.record.id);
     dispatchThemeSync();
-    await hydrateManagedStateToLocalStorage(ownerId);
     syncRolesFromStorage();
     syncCurrentUserFromAuthStore();
-    await refreshUsers();
     setIsReady(true);
+
+    runWhenIdle(() => {
+      void (async () => {
+        await hydrateManagedStateToLocalStorage(ownerId);
+        dispatchThemeSync();
+        syncRolesFromStorage();
+        await refreshUsers();
+      })().catch((error) => {
+        console.error('Failed to hydrate background user workspace state.', error);
+      });
+    });
   }, [refreshUsers, syncCurrentUserFromAuthStore, syncRolesFromStorage]);
 
   useEffect(() => {
@@ -313,9 +354,11 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     if (!currentUser?.id) return;
-    void warmMediaUploadPipeline();
-    void prepareUpload('staff-avatar', { ownerUserId: currentUser.id });
-    void prepareUpload('staff-signature', { ownerUserId: currentUser.id });
+    return runWhenIdle(() => {
+      void warmMediaUploadPipeline();
+      void prepareUpload('staff-avatar', { ownerUserId: currentUser.id });
+      void prepareUpload('staff-signature', { ownerUserId: currentUser.id });
+    }, 3500);
   }, [currentUser?.id]);
 
   useEffect(() => {
@@ -351,11 +394,12 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
       startInterval();
     };
 
-    runWarmup();
+    const cancelInitialWarmup = runWhenIdle(runWarmup, 5000);
     startInterval();
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
+      cancelInitialWarmup();
       stopInterval();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
@@ -536,7 +580,28 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
       throw new Error('Email and password are required.');
     }
 
-    await backend.collection('users').authWithPassword(identity, secret);
+    const cachedSession = await readFastLoginSession(identity, secret);
+    if (cachedSession) {
+      backend.authStore.save(cachedSession.token, cachedSession.record);
+      void backend.authStore.refresh().then((result) => {
+        void writeFastLoginSession(identity, secret, {
+          token: result.token,
+          record: result.record || {},
+          cachedAt: Date.now(),
+        });
+        syncCurrentUserFromAuthStore();
+      }).catch((error) => {
+        void clearFastLoginSession(identity);
+        console.error('Cached login session could not be refreshed.', error);
+      });
+    } else {
+      const result = await backend.collection('users').authWithPassword(identity, secret);
+      void writeFastLoginSession(identity, secret, {
+        token: result.token,
+        record: result.record || {},
+        cachedAt: Date.now(),
+      });
+    }
 
     if (!backend.authStore.record) {
       throw new Error('Authentication succeeded but no account record was returned.');
@@ -551,10 +616,19 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
 
     dispatchThemeSync();
-    await hydrateManagedStateToLocalStorage(ownerId);
     syncRolesFromStorage();
     syncCurrentUserFromAuthStore();
-    await refreshUsers();
+
+    runWhenIdle(() => {
+      void (async () => {
+        await hydrateManagedStateToLocalStorage(ownerId);
+        dispatchThemeSync();
+        syncRolesFromStorage();
+        await refreshUsers();
+      })().catch((error) => {
+        console.error('Failed to hydrate user workspace after login.', error);
+      });
+    });
   }, [refreshUsers, syncCurrentUserFromAuthStore, syncRolesFromStorage]);
 
   const register = useCallback(async (input: {
@@ -579,10 +653,18 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const ownerId = String(result.record.id);
 
     dispatchThemeSync();
-    await hydrateManagedStateToLocalStorage(ownerId);
     syncRolesFromStorage();
     syncCurrentUserFromAuthStore();
-    await refreshUsers();
+    runWhenIdle(() => {
+      void (async () => {
+        await hydrateManagedStateToLocalStorage(ownerId);
+        dispatchThemeSync();
+        syncRolesFromStorage();
+        await refreshUsers();
+      })().catch((error) => {
+        console.error('Failed to hydrate user workspace after registration.', error);
+      });
+    });
   }, [refreshUsers, syncCurrentUserFromAuthStore, syncRolesFromStorage]);
 
   const requestPasswordReset = useCallback(async (email: string) => {
@@ -606,10 +688,11 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         mustResetPassword: false,
       });
       backend.authStore.save(backend.authStore.token, refreshed);
+      void clearFastLoginSession(currentUser.email);
       syncCurrentUserFromAuthStore();
       await refreshUsers();
     }
-  }, [currentUser?.id, refreshUsers, syncCurrentUserFromAuthStore]);
+  }, [currentUser?.email, currentUser?.id, refreshUsers, syncCurrentUserFromAuthStore]);
 
   const logout = useCallback(() => {
     backend.authStore.clear();
@@ -640,7 +723,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         refreshUsers,
       }}
     >
-      {isReady ? children : <SecureWorkspaceBootstrap />}
+      {children}
     </UserContext.Provider>
   );
 };

@@ -15,7 +15,7 @@ export const PublicBrand: React.FC<PublicBrandProps> = ({
   return (
     <>
       <img
-        src="/PSA.png"
+        src="/PSA.webp"
         alt="PSA"
         className={`w-[3.25rem] h-[3.25rem] sm:w-[3.75rem] sm:h-[3.75rem] object-contain shrink-0 ${isInverse ? 'drop-shadow-[0_8px_18px_rgba(2,6,23,0.44)]' : ''}`}
       />

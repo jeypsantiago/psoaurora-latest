@@ -30,6 +30,7 @@ export const AUTH_COLLECTION = 'users';
 let currentToken = pb.authStore.token || '';
 let currentModel: RecordModel | null = (pb.authStore.model as RecordModel | null) ?? null;
 let authResolved = false;
+let initialAuthPromise: Promise<RecordModel | null> | null = null;
 const authListeners = new Set<(token: string, record: RecordModel | null) => void>();
 
 const notifyAuthListeners = () => {
@@ -46,6 +47,8 @@ const setCurrentAuth = (token: string, record: RecordModel | null) => {
 };
 
 const refreshInitialAuth = async () => {
+  const startedToken = pb.authStore.token || '';
+
   if (!pb.authStore.isValid) {
     setCurrentAuth('', null);
     return null;
@@ -53,9 +56,15 @@ const refreshInitialAuth = async () => {
 
   try {
     const authData = await pb.collection(AUTH_COLLECTION).authRefresh();
+    if ((pb.authStore.token || '') !== (authData.token || startedToken)) {
+      return currentModel;
+    }
     setCurrentAuth(authData.token, (authData.record as RecordModel | null) ?? null);
     return authData.record ?? null;
   } catch (error) {
+    if ((pb.authStore.token || '') !== startedToken) {
+      return currentModel;
+    }
     console.error('Failed to refresh initial PocketBase auth state.', error);
     pb.authStore.clear();
     setCurrentAuth('', null);
@@ -63,13 +72,12 @@ const refreshInitialAuth = async () => {
   }
 };
 
-const initialAuthPromise = refreshInitialAuth();
-
 pb.authStore.onChange((token, model) => {
   setCurrentAuth(token || '', (model as RecordModel | null) ?? null);
-}, true);
+}, false);
 
 export const waitForInitialAuth = async () => {
+  initialAuthPromise ??= refreshInitialAuth();
   await initialAuthPromise;
 };
 

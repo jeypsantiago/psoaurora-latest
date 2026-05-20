@@ -23,11 +23,47 @@ const contentTypes = new Map([
   ['.png', 'image/png'],
   ['.jpg', 'image/jpeg'],
   ['.jpeg', 'image/jpeg'],
+  ['.webp', 'image/webp'],
   ['.svg', 'image/svg+xml'],
   ['.ico', 'image/x-icon'],
   ['.woff', 'font/woff'],
   ['.woff2', 'font/woff2'],
 ]);
+const encodedAssetExtensions = new Set([
+  '.css',
+  '.html',
+  '.js',
+  '.json',
+  '.mjs',
+  '.svg',
+  '.txt',
+  '.xml',
+]);
+
+const fileExists = async (filePath) => {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const chooseEncodedAsset = async (req, filePath) => {
+  const ext = path.extname(filePath).toLowerCase();
+  if (!encodedAssetExtensions.has(ext)) {
+    return { filePath, encoding: '' };
+  }
+
+  const accepted = String(req.headers['accept-encoding'] || '');
+  if (/\bbr\b/.test(accepted) && await fileExists(`${filePath}.br`)) {
+    return { filePath: `${filePath}.br`, encoding: 'br' };
+  }
+  if (/\bgzip\b/.test(accepted) && await fileExists(`${filePath}.gz`)) {
+    return { filePath: `${filePath}.gz`, encoding: 'gzip' };
+  }
+  return { filePath, encoding: '' };
+};
 
 const sendJson = (res, statusCode, payload) => {
   res.writeHead(statusCode, {
@@ -46,6 +82,7 @@ const sendRuntimeConfig = (res) => {
   res.writeHead(200, {
     'Content-Type': 'text/javascript; charset=utf-8',
     'Cache-Control': 'no-store',
+    'Vary': 'Accept-Encoding',
   });
   res.end(`window.__AURORA_RUNTIME_CONFIG__ = ${JSON.stringify(config)};\n`);
 };
@@ -156,12 +193,19 @@ const serveStatic = async (req, res) => {
   }
 
   try {
-    const data = await fs.readFile(filePath);
+    const originalExt = path.extname(filePath).toLowerCase();
+    const selected = await chooseEncodedAsset(req, filePath);
+    const data = req.method === 'HEAD' ? null : await fs.readFile(selected.filePath);
     const ext = path.extname(filePath).toLowerCase();
-    res.writeHead(200, {
+    const headers = {
       'Content-Type': contentTypes.get(ext) || 'application/octet-stream',
-      'Cache-Control': ext === '.html' ? 'no-store' : 'public, max-age=31536000, immutable',
-    });
+      'Cache-Control': originalExt === '.html' ? 'no-store' : 'public, max-age=31536000, immutable',
+      'Vary': 'Accept-Encoding',
+    };
+    if (selected.encoding) {
+      headers['Content-Encoding'] = selected.encoding;
+    }
+    res.writeHead(200, headers);
     res.end(data);
   } catch {
     sendJson(res, 404, { ok: false, message: 'Not found.' });

@@ -6,7 +6,6 @@ import {
   getCurrentAuthRecord,
   getCurrentUserId,
   hasActiveSession,
-  subscribeToAuth,
   waitForInitialAuth,
 } from './pocketbase';
 
@@ -130,24 +129,6 @@ const setCurrentAuth = (token: string, record: AnyRecord | null) => {
   notifyAuthListeners();
 };
 
-const syncAuthRecordFromStore = async () => {
-  currentToken = pb.authStore.token || '';
-  const authRecord = getCurrentAuthRecord();
-
-  if (!currentToken || !authRecord?.id) {
-    setCurrentAuth('', null);
-    return;
-  }
-
-  try {
-    const fresh = await pb.collection(AUTH_COLLECTION).getOne(String(authRecord.id));
-    setCurrentAuth(currentToken, mapUserRecord(fresh));
-  } catch (error) {
-    console.error('Failed to hydrate PocketBase auth record.', error);
-    setCurrentAuth(currentToken, mapUserRecord(authRecord));
-  }
-};
-
 const appendIfDefined = (formData: FormData, key: string, value: unknown) => {
   if (value === undefined) return;
   if (value === null) {
@@ -237,11 +218,6 @@ const fetchUserRecord = async (userId: string) => {
     return null;
   }
 };
-
-void waitForInitialAuth().then(() => syncAuthRecordFromStore());
-subscribeToAuth(() => {
-  void syncAuthRecordFromStore();
-});
 
 const usersCollection = {
   async getFullList(options?: { sort?: string }) {
@@ -444,8 +420,26 @@ export const backend = {
     },
     async resolve() {
       await waitForInitialAuth();
-      if (pb.authStore.isValid) {
-        await syncAuthRecordFromStore();
+      const authRecord = getCurrentAuthRecord();
+      if (pb.authStore.isValid && authRecord?.id) {
+        setCurrentAuth(pb.authStore.token || '', mapUserRecord(authRecord));
+        return;
+      }
+      setCurrentAuth('', null);
+    },
+    async refresh() {
+      try {
+        const authData = await pb.collection(AUTH_COLLECTION).authRefresh();
+        const mapped = mapUserRecord(authData.record);
+        setCurrentAuth(authData.token, mapped);
+        return {
+          token: authData.token,
+          record: mapped,
+        };
+      } catch (error) {
+        pb.authStore.clear();
+        setCurrentAuth('', null);
+        throw error;
       }
     },
   },

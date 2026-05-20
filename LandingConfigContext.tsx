@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useState, useEffect, useRef } from "react";
 import { STORAGE_KEYS } from "./constants/storageKeys";
 import { backend } from "./services/backend";
 import { upsertAppStateFromStorageValue } from "./services/appState";
@@ -300,10 +300,15 @@ export const LandingConfigProvider: React.FC<{ children: React.ReactNode }> = ({
     );
     return saved ? sanitizeConfig(saved) : defaultConfig;
   });
+  const configRef = useRef(config);
   const authOwnerId =
     backend.authStore.isValid && backend.authStore.record
       ? String(backend.authStore.record.id)
       : "";
+
+  useEffect(() => {
+    configRef.current = config;
+  }, [config]);
 
   useEffect(() => {
     try {
@@ -350,7 +355,7 @@ export const LandingConfigProvider: React.FC<{ children: React.ReactNode }> = ({
           try {
             await upsertAppStateFromStorageValue(
               STORAGE_KEYS.landingConfig,
-              JSON.stringify(config),
+              JSON.stringify(configRef.current),
               authOwnerId,
             );
           } catch {
@@ -375,7 +380,7 @@ export const LandingConfigProvider: React.FC<{ children: React.ReactNode }> = ({
     return () => {
       active = false;
     };
-  }, [authOwnerId, config]);
+  }, [authOwnerId]);
 
   useEffect(() => {
     if (!isPublicLandingResolved) return;

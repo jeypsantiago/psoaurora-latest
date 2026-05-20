@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   AlertCircle,
@@ -14,25 +14,24 @@ import {
   ShieldAlert,
   Users,
 } from "lucide-react";
-import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  Cell,
-  Pie,
-  PieChart,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 import { useNavigate } from "react-router-dom";
-import { MeasuredChartContainer } from "../components/MeasuredChartContainer";
 import { Badge, Button, Card } from "../components/ui";
 import { useUsers } from "../UserContext";
 import { STORAGE_KEYS } from "../constants/storageKeys";
 import { readStorageJsonSafe } from "../services/storage";
 
 type BadgeVariant = "default" | "success" | "warning" | "info";
+
+const DashboardTrendChart = lazy(() =>
+  import("../components/dashboard/DashboardCharts").then((module) => ({
+    default: module.DashboardTrendChart,
+  })),
+);
+const DashboardWorkloadChart = lazy(() =>
+  import("../components/dashboard/DashboardCharts").then((module) => ({
+    default: module.DashboardWorkloadChart,
+  })),
+);
 
 interface RegistryRecord {
   name?: string;
@@ -295,85 +294,16 @@ const DashboardTrendCard = React.memo(function DashboardTrendCard({
         </div>
       }
     >
-      <MeasuredChartContainer className="h-64">
-        {({ width, height }) =>
-          hasTrendData ? (
-            <AreaChart
-              width={Math.max(1, width)}
-              height={Math.max(1, height)}
-              data={trendData}
-              margin={{ top: 10, right: 8, left: -12, bottom: 0 }}
-            >
-              <CartesianGrid strokeDasharray="4 4" strokeOpacity={0.15} />
-              <XAxis
-                dataKey="label"
-                tick={{ fontSize: 11, fill: "#71717a" }}
-                axisLine={false}
-                tickLine={false}
-              />
-              <YAxis
-                tick={{ fontSize: 11, fill: "#71717a" }}
-                axisLine={false}
-                tickLine={false}
-                width={34}
-                allowDecimals={false}
-              />
-              <Tooltip
-                contentStyle={{
-                  borderRadius: 12,
-                  border: "1px solid #e4e4e7",
-                  fontSize: 12,
-                }}
-                formatter={(value: number, name: string) => {
-                  const labels: Record<string, string> = {
-                    registry: "Registry",
-                    supply: "Supply",
-                    property: "Property",
-                    employment: "Employment",
-                  };
-                  return [value.toLocaleString(), labels[name] || name];
-                }}
-              />
-              <Area
-                type="monotone"
-                dataKey="registry"
-                stroke="#2563eb"
-                fill="#2563eb"
-                fillOpacity={0.12}
-                strokeWidth={2}
-              />
-              <Area
-                type="monotone"
-                dataKey="supply"
-                stroke="#0ea5e9"
-                fill="#0ea5e9"
-                fillOpacity={0.1}
-                strokeWidth={2}
-              />
-              <Area
-                type="monotone"
-                dataKey="property"
-                stroke="#10b981"
-                fill="#10b981"
-                fillOpacity={0.09}
-                strokeWidth={2}
-              />
-              <Area
-                type="monotone"
-                dataKey="employment"
-                stroke="#f59e0b"
-                fill="#f59e0b"
-                fillOpacity={0.08}
-                strokeWidth={2}
-              />
-            </AreaChart>
-          ) : (
-            <div className="h-full rounded-2xl border border-dashed border-zinc-300 dark:border-zinc-700 flex items-center justify-center text-sm font-medium text-zinc-500 dark:text-zinc-400">
-              No trend history yet. Create records to populate the chart.
-            </div>
-          )
+      <Suspense
+        fallback={
+          <div className="h-64 animate-pulse rounded-2xl bg-zinc-100 dark:bg-zinc-900" />
         }
-      </MeasuredChartContainer>
+      >
+        <DashboardTrendChart
+          trendData={trendData}
+          hasTrendData={hasTrendData}
+        />
+      </Suspense>
     </Card>
   );
 });
@@ -387,14 +317,6 @@ const DashboardWorkloadCard = React.memo(function DashboardWorkloadCard({
   workloadItems,
   navigate,
 }: DashboardWorkloadCardProps) {
-  const [activeSliceIndex, setActiveSliceIndex] = useState(0);
-
-  useEffect(() => {
-    if (activeSliceIndex >= workloadItems.length) {
-      setActiveSliceIndex(0);
-    }
-  }, [activeSliceIndex, workloadItems.length]);
-
   const totalWorkload = useMemo(
     () => workloadItems.reduce((sum, item) => sum + item.value, 0),
     [workloadItems],
@@ -402,40 +324,13 @@ const DashboardWorkloadCard = React.memo(function DashboardWorkloadCard({
 
   return (
     <Card title="Workload Mix" description="Open items requiring immediate action">
-      <MeasuredChartContainer className="h-56">
-        {({ width, height }) =>
-          workloadItems.length > 0 ? (
-            <PieChart width={Math.max(1, width)} height={Math.max(1, height)}>
-              <Tooltip formatter={(value: number) => value.toLocaleString()} />
-              <Pie
-                data={workloadItems}
-                dataKey="value"
-                nameKey="name"
-                innerRadius={54}
-                outerRadius={82}
-                paddingAngle={3}
-                onMouseEnter={(_, index) => setActiveSliceIndex(index)}
-                animationDuration={700}
-              >
-                {workloadItems.map((item, index) => (
-                  <Cell
-                    key={item.name}
-                    fill={item.color}
-                    style={{
-                      opacity: activeSliceIndex === index ? 1 : 0.72,
-                      transition: "opacity 200ms ease",
-                    }}
-                  />
-                ))}
-              </Pie>
-            </PieChart>
-          ) : (
-            <div className="h-full rounded-2xl border border-dashed border-zinc-300 dark:border-zinc-700 flex items-center justify-center text-sm font-medium text-zinc-500 dark:text-zinc-400">
-              No open workload.
-            </div>
-          )
+      <Suspense
+        fallback={
+          <div className="h-56 animate-pulse rounded-2xl bg-zinc-100 dark:bg-zinc-900" />
         }
-      </MeasuredChartContainer>
+      >
+        <DashboardWorkloadChart workloadItems={workloadItems} />
+      </Suspense>
 
       <div className="mt-2 space-y-2">
         {workloadItems.length > 0 ? (
