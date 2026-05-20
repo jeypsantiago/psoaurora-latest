@@ -191,6 +191,7 @@ export const ReportMonitoringPage: React.FC = () => {
     currentUser?.isSuperAdmin || currentUser?.roles?.includes("Super Admin"),
   );
   const currentUserId = currentUser?.id || "";
+  const canExportSummaryExcel = Boolean(currentUserId);
   const canManageAllReports = isSuperAdmin;
   const visibleProjects = useMemo(
     () =>
@@ -1473,15 +1474,15 @@ export const ReportMonitoringPage: React.FC = () => {
             <Button variant="outline" onClick={() => navigate("/settings?tab=reports")} className="!rounded-lg !px-3 !py-1.5 !text-xs">
               <Settings2 size={14} className="mr-2" /> Settings
             </Button>
+            {canExportSummaryExcel && (
+              <Button variant="outline" onClick={exportSummaryExcel} className="!rounded-lg !px-3 !py-1.5 !text-xs">
+                <FileSpreadsheet size={14} className="mr-2" /> Summary Excel
+              </Button>
+            )}
             {can("reports.export") && (
-              <>
-                <Button variant="outline" onClick={exportSummaryExcel} className="!rounded-lg !px-3 !py-1.5 !text-xs">
-                  <FileSpreadsheet size={14} className="mr-2" /> Summary Excel
-                </Button>
-                <Button variant="outline" onClick={exportCsv} className="!rounded-lg !px-3 !py-1.5 !text-xs">
-                  <Download size={14} className="mr-2" /> Export
-                </Button>
-              </>
+              <Button variant="outline" onClick={exportCsv} className="!rounded-lg !px-3 !py-1.5 !text-xs">
+                <Download size={14} className="mr-2" /> Export
+              </Button>
             )}
           </div>
         </div>
