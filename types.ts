@@ -137,7 +137,7 @@ export type Permission =
   | 'property.view' | 'property.edit' | 'property.register' | 'property.issue'
   | 'property.transfer' | 'property.count' | 'property.audit' | 'property.export'
   | 'employment.view' | 'employment.edit' | 'employment.delete' | 'employment.export'
-  | 'reports.view' | 'reports.edit' | 'reports.delete' | 'reports.reminders' | 'reports.export'
+  | 'reports.view' | 'reports.view_all' | 'reports.edit' | 'reports.delete' | 'reports.reminders' | 'reports.export'
   | 'census.view' | 'census.edit'
   | 'gmail.view' | 'gmail.send'
   | 'settings.view' | 'settings.users' | 'settings.roles' | 'settings.data';
@@ -148,7 +148,7 @@ export const PERMISSION_GROUPS = {
   'Supply': ['supply.view', 'supply.request', 'supply.approve', 'supply.export', 'supply.inventory'],
   'Property': ['property.view', 'property.edit', 'property.register', 'property.issue', 'property.transfer', 'property.count', 'property.audit', 'property.export'],
   'Employment': ['employment.view', 'employment.edit', 'employment.delete', 'employment.export'],
-  'Report Monitoring': ['reports.view', 'reports.edit', 'reports.delete', 'reports.reminders', 'reports.export'],
+  'Report Monitoring': ['reports.view', 'reports.view_all', 'reports.edit', 'reports.delete', 'reports.reminders', 'reports.export'],
   'Census & Surveys': ['census.view', 'census.edit'],
   'Gmail': ['gmail.view', 'gmail.send'],
   'Settings': ['settings.view', 'settings.users', 'settings.roles', 'settings.data'],
@@ -196,6 +196,7 @@ export const PERMISSION_DESCRIPTIONS: Record<Permission, string> = {
   'employment.export': 'Generate and download Certificate of Employment (COE) PDFs.',
 
   'reports.view': 'View report monitoring projects, deadlines, and submission status.',
+  'reports.view_all': 'View report projects and submission schedules added by all users (read-only unless owner/focal).',
   'reports.edit': 'Create and update report projects and report submission schedules.',
   'reports.delete': 'Remove report projects and report submission records.',
   'reports.reminders': 'Configure and run report deadline email reminders.',

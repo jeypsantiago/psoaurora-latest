@@ -32,6 +32,7 @@ import {
   readStorageJsonSafe,
   writeStorageJson,
 } from "../services/storage";
+import { useLocalStorageState } from "../hooks/useLocalStorageState";
 
 interface AuditLog {
   action: string;
@@ -185,11 +186,13 @@ export const RecordPage: React.FC = () => {
   const [isEditMode, setIsEditMode] = useState(false);
   const [isSubmittingRecord, setIsSubmittingRecord] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [docTypes, setDocTypes] = useState<RegistryDocTypeConfig[]>(() =>
+  const [docTypes, setDocTypes] = useLocalStorageState<RegistryDocTypeConfig[]>(
+    STORAGE_KEYS.recordDocTypes,
     readRegistryDocTypesFromStorage(),
   );
-  const [docFields, setDocFields] = useState<Record<string, SchemaField[]>>(
-    () => readDocFieldsFromStorage(),
+  const [docFields, setDocFields] = useLocalStorageState<Record<string, SchemaField[]>>(
+    STORAGE_KEYS.recordDocFields,
+    readDocFieldsFromStorage(),
   );
 
   const enabledDocTypes = useMemo<RegistryDocTypeConfig[]>(() => {
@@ -200,31 +203,26 @@ export const RecordPage: React.FC = () => {
     return enabledDocTypes.map((doc) => doc.name);
   }, [enabledDocTypes]);
 
-  const [dataCollections, setDataCollections] = useState<
+  const [dataCollections, setDataCollections] = useLocalStorageState<
     Record<string, string[]>
-  >(() => {
-    return readStorageJson<Record<string, string[]>>(
-      STORAGE_KEYS.dataCollections,
-      {
-        Positions: [
-          "Admin Clerk",
-          "Statistician",
-          "Field Officer",
-          "Provincial Lead",
-        ],
-        Municipalities: [
-          "Baler",
-          "Casiguran",
-          "Dilasag",
-          "Dinalungan",
-          "Dingalan",
-          "Dipaculao",
-          "Maria Aurora",
-          "San Luis",
-        ],
-        Genders: ["Male", "Female", "Prefer not to say"],
-      },
-    );
+  >(STORAGE_KEYS.dataCollections, {
+    Positions: [
+      "Admin Clerk",
+      "Statistician",
+      "Field Officer",
+      "Provincial Lead",
+    ],
+    Municipalities: [
+      "Baler",
+      "Casiguran",
+      "Dilasag",
+      "Dinalungan",
+      "Dingalan",
+      "Dipaculao",
+      "Maria Aurora",
+      "San Luis",
+    ],
+    Genders: ["Male", "Female", "Prefer not to say"],
   });
 
   // Report Filters
@@ -293,12 +291,10 @@ export const RecordPage: React.FC = () => {
     };
   }, [docTypes]);
 
-  const [records, setRecords] = useState<RegistryRecord[]>(() => {
-    return readStorageJson<RegistryRecord[]>(
-      STORAGE_KEYS.registryRecords,
-      DEFAULT_RECORDS,
-    );
-  });
+  const [records, setRecords] = useLocalStorageState<RegistryRecord[]>(
+    STORAGE_KEYS.registryRecords,
+    DEFAULT_RECORDS,
+  );
 
   const reportDocumentTypes = useMemo(() => {
     const merged = new Set<string>([
@@ -307,10 +303,6 @@ export const RecordPage: React.FC = () => {
     ]);
     return Array.from(merged);
   }, [enabledDocTypeNames, records]);
-
-  useEffect(() => {
-    writeStorageJson(STORAGE_KEYS.registryRecords, records);
-  }, [records]);
 
   const [formData, setFormData] = useState({
     type: enabledDocTypeNames[0] || "",
@@ -378,7 +370,7 @@ export const RecordPage: React.FC = () => {
   const [editingReg, setEditingReg] = useState<string | null>(null);
 
   useEffect(() => {
-    const refreshSettings = () => {
+    const refreshSettingsOnFocus = () => {
       setDocTypes(readRegistryDocTypesFromStorage());
       setDocFields(readDocFieldsFromStorage());
       const parsedCollections = readStorageJsonSafe<unknown>(
@@ -394,11 +386,9 @@ export const RecordPage: React.FC = () => {
       }
     };
 
-    window.addEventListener("storage", refreshSettings);
-    window.addEventListener("focus", refreshSettings);
+    window.addEventListener("focus", refreshSettingsOnFocus);
     return () => {
-      window.removeEventListener("storage", refreshSettings);
-      window.removeEventListener("focus", refreshSettings);
+      window.removeEventListener("focus", refreshSettingsOnFocus);
     };
   }, []);
 

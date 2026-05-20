@@ -117,15 +117,26 @@ const DEFAULT_ROLES: Role[] = [
     id: '5',
     name: 'Report Contributor',
     description: 'Self-service access to create and maintain owned report monitoring projects and schedules.',
-    permissions: ['dashboard.view', 'reports.view', 'reports.edit'],
+    permissions: ['dashboard.view', 'reports.view', 'reports.view_all', 'reports.edit'],
     badgeColor: 'emerald',
   },
 ];
 
 const ensureDefaultRoles = (roles: Role[]): Role[] => {
-  const existingNames = new Set(roles.map((role) => role.name));
+  const updatedRoles = roles.map((role) => {
+    const defaultRole = DEFAULT_ROLES.find((r) => r.name === role.name);
+    if (defaultRole) {
+      const nextPermissions = Array.from(new Set([...role.permissions, ...defaultRole.permissions]));
+      if (nextPermissions.length !== role.permissions.length) {
+        return { ...role, permissions: nextPermissions };
+      }
+    }
+    return role;
+  });
+
+  const existingNames = new Set(updatedRoles.map((role) => role.name));
   const missingRoles = DEFAULT_ROLES.filter((role) => !existingNames.has(role.name));
-  return missingRoles.length > 0 ? [...roles, ...missingRoles] : roles;
+  return missingRoles.length > 0 ? [...updatedRoles, ...missingRoles] : updatedRoles;
 };
 
 const UserContext = createContext<UserContextType | undefined>(undefined);

@@ -76,7 +76,18 @@ const syncRemoveItem = (key: string) => {
 const setLocalWithoutSync = (key: string, value: string) => {
   isHydrating = true;
   try {
+    const oldValue = originalGetItem.call(window.localStorage, key);
     originalSetItem.call(window.localStorage, key, value);
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new StorageEvent("storage", {
+          key,
+          newValue: value,
+          oldValue,
+          storageArea: window.localStorage,
+        })
+      );
+    }
   } finally {
     isHydrating = false;
   }
@@ -85,7 +96,18 @@ const setLocalWithoutSync = (key: string, value: string) => {
 const removeLocalWithoutSync = (key: string) => {
   isHydrating = true;
   try {
+    const oldValue = originalGetItem.call(window.localStorage, key);
     originalRemoveItem.call(window.localStorage, key);
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new StorageEvent("storage", {
+          key,
+          newValue: null,
+          oldValue,
+          storageArea: window.localStorage,
+        })
+      );
+    }
   } finally {
     isHydrating = false;
   }
@@ -97,16 +119,34 @@ export const installLocalStateBridge = (userIdGetter: UserIdGetter) => {
   if (isInstalled) return;
 
   storagePrototype.setItem = function setItemPatched(this: Storage, key: string, value: string) {
+    const oldValue = originalGetItem.call(this, key);
     originalSetItem.call(this, key, value);
     if (this === window.localStorage) {
       syncSetItem(key, value);
+      window.dispatchEvent(
+        new StorageEvent("storage", {
+          key,
+          newValue: value,
+          oldValue,
+          storageArea: window.localStorage,
+        })
+      );
     }
   };
 
   storagePrototype.removeItem = function removeItemPatched(this: Storage, key: string) {
+    const oldValue = originalGetItem.call(this, key);
     originalRemoveItem.call(this, key);
     if (this === window.localStorage) {
       syncRemoveItem(key);
+      window.dispatchEvent(
+        new StorageEvent("storage", {
+          key,
+          newValue: null,
+          oldValue,
+          storageArea: window.localStorage,
+        })
+      );
     }
   };
 
@@ -116,6 +156,13 @@ export const installLocalStateBridge = (userIdGetter: UserIdGetter) => {
       originalClear.call(this);
       for (const key of keysToDelete) {
         syncRemoveItem(key);
+        window.dispatchEvent(
+          new StorageEvent("storage", {
+            key,
+            newValue: null,
+            storageArea: window.localStorage,
+          })
+        );
       }
       return;
     }

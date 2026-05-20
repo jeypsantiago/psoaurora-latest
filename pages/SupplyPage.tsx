@@ -50,6 +50,7 @@ import { useUsers } from "../UserContext";
 import { useDialog } from "../DialogContext";
 import { useToast } from "../ToastContext";
 import { STORAGE_KEYS } from "../constants/storageKeys";
+import { useLocalStorageState } from "../hooks/useLocalStorageState";
 import {
   readStorageJson,
   readStorageJsonSafe,
@@ -733,12 +734,10 @@ export const SupplyPage: React.FC = () => {
     useState<RequestStatus>("For Verification");
 
   // -- State for Inventory --
-  const [inventory, setInventory] = useState<InventoryItem[]>(() => {
-    return readStorageJson<InventoryItem[]>(
-      STORAGE_KEYS.supplyInventory,
-      DEFAULT_INVENTORY,
-    );
-  });
+  const [inventory, setInventory] = useLocalStorageState<InventoryItem[]>(
+    STORAGE_KEYS.supplyInventory,
+    DEFAULT_INVENTORY,
+  );
   const [itemSearch, setItemSearch] = useState("");
   const [inventorySearch, setInventorySearch] = useState("");
   const [itemsViewMode, setItemsViewMode] = useState<"list" | "grid">(() => {
@@ -761,14 +760,9 @@ export const SupplyPage: React.FC = () => {
   );
 
   // -- State for Cart/Requests --
-  const [requestCart, setRequestCart] = useState<
+  const [requestCart, setRequestCart] = useLocalStorageState<
     { itemId: string; qty: number }[]
-  >(() => {
-    return readStorageJson<{ itemId: string; qty: number }[]>(
-      STORAGE_KEYS.supplyCart,
-      [],
-    );
-  });
+  >(STORAGE_KEYS.supplyCart, []);
   const [isRequestModalOpen, setIsRequestModalOpen] = useState(false);
   const [requestPurpose, setRequestPurpose] = useState(() => {
     return readStorageString(STORAGE_KEYS.supplyRequestPurpose);
@@ -781,10 +775,6 @@ export const SupplyPage: React.FC = () => {
   useEffect(() => {
     setStorageItem(STORAGE_KEYS.supplyInventoryView, inventoryViewMode);
   }, [inventoryViewMode]);
-
-  useEffect(() => {
-    writeStorageJson(STORAGE_KEYS.supplyCart, requestCart);
-  }, [requestCart]);
 
   useEffect(() => {
     setStorageItem(STORAGE_KEYS.supplyRequestPurpose, requestPurpose);
@@ -871,20 +861,10 @@ export const SupplyPage: React.FC = () => {
   };
 
   // -- State for Requests --
-  const [requests, setRequests] = useState<SupplyRequest[]>(() => {
-    return readStorageJson<SupplyRequest[]>(
-      STORAGE_KEYS.supplyRequests,
-      DEFAULT_REQUESTS,
-    );
-  });
-
-  useEffect(() => {
-    writeStorageJson(STORAGE_KEYS.supplyInventory, inventory);
-  }, [inventory]);
-
-  useEffect(() => {
-    writeStorageJson(STORAGE_KEYS.supplyRequests, requests);
-  }, [requests]);
+  const [requests, setRequests] = useLocalStorageState<SupplyRequest[]>(
+    STORAGE_KEYS.supplyRequests,
+    DEFAULT_REQUESTS,
+  );
 
   const generateRequestId = () => {
     const fallbackConfig = {

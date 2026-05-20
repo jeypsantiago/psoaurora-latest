@@ -114,6 +114,10 @@ const OLD_DEADLINE_DESCRIPTION =
 const upgradeReportReminderTemplate = (template: string): string =>
   String(template || "")
     .replace(
+      /<img\s+src="https?:\/\/(?:aurora|psa)\.pso-aurora\.com\/PSA\.png"[^>]*>/gi,
+      "{{psaLogo}}",
+    )
+    .replace(
       /<h1([^>]*)>\s*Report due on\s*<strong>\{\{deadline\}\}<\/strong>\s*<\/h1>/gi,
       "<h1$1>{{deadlineHeadline}}</h1>",
     )

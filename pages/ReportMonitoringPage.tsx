@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import type { Range } from "xlsx-js-style";
 import {
@@ -40,6 +40,7 @@ import {
   type ReportStatus,
 } from "../services/reportMonitoring";
 import { readStorageJsonSafe, writeStorageJson } from "../services/storage";
+import { useLocalStorageState } from "../hooks/useLocalStorageState";
 import { useToast } from "../ToastContext";
 import type {
   ReportFrequency,
@@ -124,29 +125,41 @@ const isOwnedBy = (
 ) => Boolean(userId && value?.ownerUserId === userId);
 
 export const ReportMonitoringPage: React.FC = () => {
-  const { users, currentUser } = useUsers();
+  const { users, currentUser, isReady } = useUsers();
   const { can } = useRbac();
   const { toast } = useToast();
   const { confirm } = useDialog();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
 
-  const [projects, setProjects] = useState<ReportProject[]>(() =>
-    readStorageJsonSafe<ReportProject[]>(STORAGE_KEYS.reportProjects, []),
+  const [projects, setProjects] = useLocalStorageState<ReportProject[]>(
+    STORAGE_KEYS.reportProjects,
+    [],
   );
-  const [reports, setReports] = useState<ReportSubmission[]>(() =>
-    normalizeReportSeries(
-      readStorageJsonSafe<ReportSubmission[]>(STORAGE_KEYS.reportSubmissions, []),
-    ).reports,
+  const [rawReports, setRawReports] = useLocalStorageState<ReportSubmission[]>(
+    STORAGE_KEYS.reportSubmissions,
+    [],
   );
+  const reports = useMemo(() => {
+    return normalizeReportSeries(rawReports).reports;
+  }, [rawReports]);
+  const setReports = useCallback((
+    value: React.SetStateAction<ReportSubmission[]>
+  ) => {
+    setRawReports((prev) => {
+      const next = typeof value === "function" ? (value as (prev: ReportSubmission[]) => ReportSubmission[])(normalizeReportSeries(prev).reports) : value;
+      return normalizeReportSeries(next).reports;
+    });
+  }, [setRawReports]);
   const [settings] = useState<ReportReminderSettings>(() =>
     readStorageJsonSafe<ReportReminderSettings>(
       STORAGE_KEYS.reportSettings,
       DEFAULT_REPORT_REMINDER_SETTINGS,
     ),
   );
-  const [reminderLog, setReminderLog] = useState<ReportReminderLog[]>(() =>
-    readStorageJsonSafe<ReportReminderLog[]>(STORAGE_KEYS.reportReminderLog, []),
+  const [reminderLog, setReminderLog] = useLocalStorageState<ReportReminderLog[]>(
+    STORAGE_KEYS.reportReminderLog,
+    [],
   );
 
   const [activeTab, setActiveTab] = useState<ViewTab>("projects");
@@ -173,8 +186,6 @@ export const ReportMonitoringPage: React.FC = () => {
   const [reportForm, setReportForm] = useState<ReportFormState>(() =>
     emptyReportForm(projects),
   );
-  const didMountProjectsPersistence = useRef(false);
-  const didMountReportsPersistence = useRef(false);
 
   const usersById = useMemo(() => {
     const map = new Map(users.map((user) => [user.id, user]));
@@ -192,13 +203,72 @@ export const ReportMonitoringPage: React.FC = () => {
   );
   const currentUserId = currentUser?.id || "";
   const canExportSummaryExcel = Boolean(currentUserId);
-  const canManageAllReports = isSuperAdmin;
+  const canViewAllReports = isSuperAdmin || can("reports.view_all");
+
+  const canEditProject = useCallback(
+    (project: ReportProject) => {
+      if (isSuperAdmin) return true;
+      if (!can("reports.edit")) return false;
+      return (
+        project.ownerUserId === currentUserId ||
+        project.focalUserId === currentUserId
+      );
+    },
+    [isSuperAdmin, can, currentUserId],
+  );
+
+  const canDeleteProject = useCallback(
+    (project: ReportProject) => {
+      if (isSuperAdmin) return true;
+      if (!can("reports.delete")) return false;
+      return (
+        project.ownerUserId === currentUserId ||
+        project.focalUserId === currentUserId
+      );
+    },
+    [isSuperAdmin, can, currentUserId],
+  );
+
+  const canEditReport = useCallback(
+    (report: ReportSubmission) => {
+      if (isSuperAdmin) return true;
+      if (!can("reports.edit")) return false;
+
+      const project = projectsById.get(report.projectId);
+      const isFocal = project ? project.focalUserId === currentUserId : false;
+      const isProjectOwner = project ? project.ownerUserId === currentUserId : false;
+      const isReportOwner = report.ownerUserId === currentUserId;
+
+      return isReportOwner || isProjectOwner || isFocal;
+    },
+    [isSuperAdmin, can, currentUserId, projectsById],
+  );
+
+  const canDeleteReport = useCallback(
+    (report: ReportSubmission) => {
+      if (isSuperAdmin) return true;
+      if (!can("reports.delete")) return false;
+
+      const project = projectsById.get(report.projectId);
+      const isFocal = project ? project.focalUserId === currentUserId : false;
+      const isProjectOwner = project ? project.ownerUserId === currentUserId : false;
+      const isReportOwner = report.ownerUserId === currentUserId;
+
+      return isReportOwner || isProjectOwner || isFocal;
+    },
+    [isSuperAdmin, can, currentUserId, projectsById],
+  );
+
   const visibleProjects = useMemo(
     () =>
-      canManageAllReports
+      canViewAllReports
         ? projects
-        : projects.filter((project) => isOwnedBy(project, currentUserId)),
-    [canManageAllReports, currentUserId, projects],
+        : projects.filter(
+            (project) =>
+              project.ownerUserId === currentUserId ||
+              project.focalUserId === currentUserId,
+          ),
+    [canViewAllReports, currentUserId, projects],
   );
   const visibleProjectIds = useMemo(
     () => new Set(visibleProjects.map((project) => project.id)),
@@ -206,17 +276,23 @@ export const ReportMonitoringPage: React.FC = () => {
   );
   const visibleReports = useMemo(
     () =>
-      canManageAllReports
+      canViewAllReports
         ? reports
         : reports.filter((report) => {
-            if (isOwnedBy(report, currentUserId)) return true;
+            if (report.ownerUserId === currentUserId) return true;
             const project = projectsById.get(report.projectId);
-            return isOwnedBy(project, currentUserId);
+            if (!project) return false;
+            return (
+              project.ownerUserId === currentUserId ||
+              project.focalUserId === currentUserId
+            );
           }),
-    [canManageAllReports, currentUserId, projectsById, reports],
+    [canViewAllReports, currentUserId, projectsById, reports],
   );
 
   useEffect(() => {
+    if (!isReady) return;
+
     const tabParam = searchParams.get("tab");
     if (tabParam === "projects" || tabParam === "all" || tabParam === "due-soon") {
       setActiveTab(tabParam);
@@ -224,34 +300,34 @@ export const ReportMonitoringPage: React.FC = () => {
     if (tabParam === "reports") {
       setActiveTab("all");
     }
+
+    let urlChanged = false;
+    const nextParams = new URLSearchParams(searchParams);
+
     if (searchParams.get("action") === "new-report" && can("reports.edit")) {
       openNewReport();
+      nextParams.delete("action");
+      urlChanged = true;
     }
     if (searchParams.get("action") === "new-project" && can("reports.edit")) {
-      setActiveTab("projects");
-      openNewProject();
+      const hasExistingProjects = visibleProjects.length > 0;
+      const hasExistingReports = visibleReports.length > 0;
+      if (!hasExistingProjects || !hasExistingReports) {
+        setActiveTab("projects");
+        openNewProject();
+      }
+      nextParams.delete("action");
+      urlChanged = true;
     }
     if (searchParams.get("action") === "settings") {
       navigate("/settings?tab=reports");
     }
+
+    if (urlChanged) {
+      setSearchParams(nextParams, { replace: true });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
-
-  useEffect(() => {
-    if (!didMountProjectsPersistence.current) {
-      didMountProjectsPersistence.current = true;
-      return;
-    }
-    writeStorageJson(STORAGE_KEYS.reportProjects, projects);
-  }, [projects]);
-
-  useEffect(() => {
-    if (!didMountReportsPersistence.current) {
-      didMountReportsPersistence.current = true;
-      return;
-    }
-    writeStorageJson(STORAGE_KEYS.reportSubmissions, reports);
-  }, [reports]);
+  }, [searchParams, isReady]);
 
   useEffect(() => {
     if (!currentUserId) return;
@@ -260,7 +336,7 @@ export const ReportMonitoringPage: React.FC = () => {
       let changed = false;
       const next = prev.map((project) => {
         if (project.focalUserId) return project;
-        if (!canManageAllReports && project.ownerUserId !== currentUserId) return project;
+        if (!isSuperAdmin && project.ownerUserId !== currentUserId) return project;
         changed = true;
         return {
           ...project,
@@ -269,7 +345,7 @@ export const ReportMonitoringPage: React.FC = () => {
       });
       return changed ? next : prev;
     });
-  }, [canManageAllReports, currentUserId]);
+  }, [isSuperAdmin, currentUserId]);
 
   const allReportRows = useMemo<ReportRow[]>(() =>
     visibleReports.map((report) => {
@@ -622,7 +698,7 @@ export const ReportMonitoringPage: React.FC = () => {
   };
 
   const openSubmittedDateEditor = (report: ReportSubmission) => {
-    if (!can("reports.edit")) return;
+    if (!canEditReport(report)) return;
     setSubmittedDateReport(report);
     setSubmittedDateValue(report.submittedDate || new Date().toISOString().slice(0, 10));
   };
@@ -631,6 +707,10 @@ export const ReportMonitoringPage: React.FC = () => {
     if (!can("reports.edit")) return;
     const name = projectForm.name.trim();
     const existingProject = projects.find((project) => project.id === projectForm.id);
+    if (existingProject && !canEditProject(existingProject)) {
+      toast("error", "You do not have permission to edit this project.");
+      return;
+    }
     const focalUserId = existingProject?.focalUserId || currentUserId;
     if (!name || !focalUserId) {
       toast("error", "Project name and focal person are required.");
@@ -680,12 +760,23 @@ export const ReportMonitoringPage: React.FC = () => {
       toast("error", "Report title, project, and deadline are required.");
       return;
     }
-    if (!selectedProject || (!canManageAllReports && !visibleProjectIds.has(selectedProject.id))) {
+    if (!selectedProject || !visibleProjectIds.has(selectedProject.id)) {
       toast("error", "Select one of your report projects.");
       return;
     }
-    const now = new Date().toISOString();
     const existingReport = reports.find((report) => report.id === reportForm.id);
+    if (existingReport) {
+      if (!canEditReport(existingReport)) {
+        toast("error", "You do not have permission to edit this report.");
+        return;
+      }
+    } else {
+      if (!canEditProject(selectedProject)) {
+        toast("error", "You do not have permission to add reports to this project.");
+        return;
+      }
+    }
+    const now = new Date().toISOString();
     const nextReport: ReportSubmission = {
       id: reportForm.id || crypto.randomUUID(),
       projectId: reportForm.projectId,
@@ -730,7 +821,7 @@ export const ReportMonitoringPage: React.FC = () => {
   };
 
   const deleteProject = async (project: ReportProject) => {
-    if (!can("reports.delete")) return;
+    if (!canDeleteProject(project)) return;
     const ok = await confirm(
       `Delete "${project.name}" and all report schedules under it? This cannot be undone.`,
       { title: "Delete Report Project", confirmLabel: "Delete" },
@@ -742,7 +833,7 @@ export const ReportMonitoringPage: React.FC = () => {
   };
 
   const deleteReport = async (report: ReportSubmission) => {
-    if (!can("reports.delete")) return;
+    if (!canDeleteReport(report)) return;
     const ok = await confirm(
       `Delete "${report.title}"? This cannot be undone.`,
       { title: "Delete Report Schedule", confirmLabel: "Delete" },
@@ -810,7 +901,7 @@ export const ReportMonitoringPage: React.FC = () => {
   };
 
   const generateNextReport = (report: ReportSubmission) => {
-    if (!can("reports.edit")) return;
+    if (!canEditReport(report)) return;
     const generated = createNextReportInstance(report, reports);
     if (!generated) {
       toast("info", "A current next period already exists for this report.");
@@ -821,7 +912,7 @@ export const ReportMonitoringPage: React.FC = () => {
   };
 
   const updateSubmittedDate = async (nextDate?: string) => {
-    if (!submittedDateReport || !can("reports.edit")) return;
+    if (!submittedDateReport || !canEditReport(submittedDateReport)) return;
     const normalizedDate = nextDate || undefined;
     const now = new Date().toISOString();
     const targetSeriesId = submittedDateReport.seriesId || submittedDateReport.id;
@@ -1116,7 +1207,7 @@ export const ReportMonitoringPage: React.FC = () => {
   };
 
   const renderSubmittedCell = (report: ReportSubmission) =>
-    can("reports.edit") ? (
+    canEditReport(report) ? (
       <button
         type="button"
         onClick={() => openSubmittedDateEditor(report)}
@@ -1203,7 +1294,7 @@ export const ReportMonitoringPage: React.FC = () => {
           )}
         </button>
       )}
-      {can("reports.edit") && row.isHistory && !row.hasCurrentNext && (
+      {canEditReport(row.report) && row.isHistory && !row.hasCurrentNext && (
         <button
           onClick={() => generateNextReport(row.report)}
           className="rounded-md p-1 text-zinc-400 hover:bg-zinc-50 hover:text-emerald-600 dark:hover:bg-zinc-900"
@@ -1212,7 +1303,7 @@ export const ReportMonitoringPage: React.FC = () => {
           <FilePlus2 size={14} />
         </button>
       )}
-      {can("reports.edit") && (
+      {canEditReport(row.report) && (
         <button
           onClick={() => openEditReport(row.report)}
           className="rounded-md p-1 text-zinc-400 hover:bg-zinc-50 hover:text-blue-600 dark:hover:bg-zinc-900"
@@ -1221,7 +1312,7 @@ export const ReportMonitoringPage: React.FC = () => {
           <Edit3 size={14} />
         </button>
       )}
-      {can("reports.delete") && (
+      {canDeleteReport(row.report) && (
         <button
           onClick={() => deleteReport(row.report)}
           className="rounded-md p-1 text-zinc-400 hover:bg-zinc-50 hover:text-red-500 dark:hover:bg-zinc-900"
@@ -1757,23 +1848,27 @@ export const ReportMonitoringPage: React.FC = () => {
                 )}
               </div>
               <div className="flex flex-wrap gap-2">
-                {activeTab === "projects" && selectedProjectGroup && can("reports.edit") && (
+                {activeTab === "projects" && selectedProjectGroup && (
                   <>
-                    <Button variant="blue" onClick={() => openNewReportForProject(selectedProjectGroup.project)} className="!rounded-lg !px-3 !py-2 !text-xs">
-                      <Plus size={13} className="mr-1.5" /> Add Report
-                    </Button>
-                    <Button variant="outline" onClick={() => openEditProject(selectedProjectGroup.project)} className="!rounded-lg !px-3 !py-2 !text-xs">
-                      <Edit3 size={13} className="mr-1.5" /> Edit Project
-                    </Button>
+                    {canEditProject(selectedProjectGroup.project) && (
+                      <Button variant="blue" onClick={() => openNewReportForProject(selectedProjectGroup.project)} className="!rounded-lg !px-3 !py-2 !text-xs">
+                        <Plus size={13} className="mr-1.5" /> Add Report
+                      </Button>
+                    )}
+                    {canEditProject(selectedProjectGroup.project) && (
+                      <Button variant="outline" onClick={() => openEditProject(selectedProjectGroup.project)} className="!rounded-lg !px-3 !py-2 !text-xs">
+                        <Edit3 size={13} className="mr-1.5" /> Edit Project
+                      </Button>
+                    )}
                   </>
                 )}
-                {activeTab === "projects" && selectedProjectGroup && can("reports.delete") && (
+                {activeTab === "projects" && selectedProjectGroup && canDeleteProject(selectedProjectGroup.project) && (
                   <Button variant="outline" onClick={() => deleteProject(selectedProjectGroup.project)} className="!rounded-lg !px-3 !py-2 !text-xs">
                     <Trash2 size={13} className="mr-1.5" /> Delete
                   </Button>
                 )}
                 {activeTab === "all" && can("reports.edit") && (
-                  <Button variant="blue" onClick={openNewReport} disabled={visibleProjects.length === 0} className="!rounded-lg !px-3 !py-2 !text-xs">
+                  <Button variant="blue" onClick={openNewReport} disabled={visibleProjects.filter(canEditProject).length === 0} className="!rounded-lg !px-3 !py-2 !text-xs">
                     <Plus size={13} className="mr-1.5" /> Add Report
                   </Button>
                 )}
@@ -1995,7 +2090,7 @@ export const ReportMonitoringPage: React.FC = () => {
                 className={selectClass}
               >
                 <option value="">Select project</option>
-                {visibleProjects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+                {visibleProjects.filter(canEditProject).map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
               </select>
             </div>
             <Input
