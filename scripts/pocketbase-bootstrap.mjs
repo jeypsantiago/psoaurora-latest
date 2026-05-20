@@ -46,6 +46,7 @@ const collectionDefinitions = [
       { name: 'legacySupabaseId', type: 'text', required: false, max: 80 },
     ],
     indexes: [
+      `CREATE INDEX idx_${authCollectionName}_name ON ${authCollectionName} (name)`,
       `CREATE UNIQUE INDEX idx_${authCollectionName}_legacy_supabase_id ON ${authCollectionName} (legacySupabaseId) WHERE legacySupabaseId != ""`,
     ],
     passwordAuth: {
@@ -69,6 +70,8 @@ const collectionDefinitions = [
     ],
     indexes: [
       'CREATE UNIQUE INDEX idx_app_state_scope_owner_key ON app_state (scope, ownerId, key)',
+      'CREATE INDEX idx_app_state_scope_key ON app_state (scope, key)',
+      'CREATE INDEX idx_app_state_key ON app_state (key)',
     ],
   },
   {
@@ -86,6 +89,9 @@ const collectionDefinitions = [
       { name: 'slotId', type: 'text', required: false, max: 120 },
       { name: 'legacySourceUrl', type: 'text', required: false, max: 500 },
       { name: 'file', type: 'file', required: true, maxSelect: 1, maxSize: 20971520, mimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/svg+xml'] },
+    ],
+    indexes: [
+      'CREATE INDEX idx_landing_assets_owner_slot ON landing_assets (ownerId, slotId)',
     ],
   },
 ];

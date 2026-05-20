@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { useUsers } from "../UserContext";
 import { useLandingConfig } from "../LandingConfigContext";
+import { BACKEND_URL } from "../services/backend";
 import { PublicBrand } from "../components/public/PublicBrand";
 import { PublicButton } from "../components/public/PublicButton";
 import { PublicCard } from "../components/public/PublicCard";
@@ -21,6 +22,42 @@ import { PublicFooter } from "../components/public/PublicFooter";
 
 const isValidEmail = (value: string) =>
   /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+
+const warmBackendConnection = () => {
+  try {
+    const backendOrigin = new URL(BACKEND_URL).origin;
+    const existingPreconnect = document.querySelector(
+      `link[rel="preconnect"][href="${backendOrigin}"]`,
+    );
+    if (!existingPreconnect) {
+      const link = document.createElement("link");
+      link.rel = "preconnect";
+      link.href = backendOrigin;
+      link.crossOrigin = "anonymous";
+      document.head.appendChild(link);
+    }
+
+    void fetch(`${backendOrigin}/api/health`, {
+      method: "GET",
+      mode: "no-cors",
+      cache: "no-store",
+    }).catch(() => {
+      // Warming is best-effort; login handles real auth errors.
+    });
+  } catch {
+    // Invalid backend URLs are handled by the auth request itself.
+  }
+};
+
+const preloadPostLoginRoute = () => {
+  void Promise.all([
+    import("../components/ProtectedShell"),
+    import("../components/ProtectedRoute"),
+    import("./Dashboard"),
+  ]).catch(() => {
+    // Non-critical speculative preload.
+  });
+};
 
 export const LoginPage: React.FC = () => {
   const [email, setEmail] = useState("");
@@ -70,6 +107,33 @@ export const LoginPage: React.FC = () => {
     return () => window.cancelAnimationFrame(frame);
   }, []);
 
+  useEffect(() => {
+    const timeoutId = window.setTimeout(warmBackendConnection, 250);
+    return () => window.clearTimeout(timeoutId);
+  }, []);
+
+  useEffect(() => {
+    if (!isValidEmail(email) || password.length < 8) return;
+
+    const browserWindow = window as Window & {
+      requestIdleCallback?: (
+        callback: () => void,
+        options?: { timeout?: number },
+      ) => number;
+      cancelIdleCallback?: (handle: number) => void;
+    };
+
+    if (typeof browserWindow.requestIdleCallback === "function") {
+      const idleId = browserWindow.requestIdleCallback(preloadPostLoginRoute, {
+        timeout: 1500,
+      });
+      return () => browserWindow.cancelIdleCallback?.(idleId);
+    }
+
+    const timeoutId = window.setTimeout(preloadPostLoginRoute, 500);
+    return () => window.clearTimeout(timeoutId);
+  }, [email, password]);
+
   const fieldErrors = useMemo(() => {
     const errs = { email: "", password: "" };
     if (!email.trim()) errs.email = "Email address is required.";
@@ -109,6 +173,7 @@ export const LoginPage: React.FC = () => {
     }
 
     setIsLoading(true);
+    warmBackendConnection();
     try {
       await login(email.trim(), password);
       navigate(redirectTarget, { replace: true });
@@ -241,7 +306,7 @@ export const LoginPage: React.FC = () => {
                 </h2>
               </div>
               <img
-                src="/PSA.png"
+                src="/PSA.webp"
                 alt="PSA Logo"
                 className="w-14 h-14 object-contain"
               />
@@ -277,7 +342,12 @@ export const LoginPage: React.FC = () => {
                     autoComplete="email"
                     required
                     value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    onChange={(e) => {
+                      setEmail(e.target.value);
+                      warmBackendConnection();
+                    }}
+                    onFocus={warmBackendConnection}
+                    onKeyDown={warmBackendConnection}
                     onBlur={() =>
                       setTouched((prev) => ({ ...prev, email: true }))
                     }
@@ -337,7 +407,12 @@ export const LoginPage: React.FC = () => {
                     autoComplete="current-password"
                     required
                     value={password}
-                    onChange={(e) => setPassword(e.target.value)}
+                    onChange={(e) => {
+                      setPassword(e.target.value);
+                      warmBackendConnection();
+                    }}
+                    onFocus={warmBackendConnection}
+                    onKeyDown={warmBackendConnection}
                     onBlur={() =>
                       setTouched((prev) => ({ ...prev, password: true }))
                     }

@@ -34,5 +34,7 @@ export const readStorageJsonSafe = <T>(key: string, fallback: T): T => {
 };
 
 export const writeStorageJson = (key: string, value: unknown): void => {
-  setStorageItem(key, JSON.stringify(value));
+  const serialized = JSON.stringify(value);
+  if (getStorageItem(key) === serialized) return;
+  setStorageItem(key, serialized);
 };

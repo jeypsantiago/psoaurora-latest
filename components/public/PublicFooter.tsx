@@ -14,7 +14,7 @@ export const PublicFooter: React.FC<PublicFooterProps> = ({ footer, rightCaption
       <div className="public-container grid grid-cols-1 md:grid-cols-4 gap-8">
         <div>
           <div className="flex items-center gap-3">
-            <img src="/PSA.png" alt="PSA Logo" className="w-14 h-14 object-contain" />
+            <img src="/PSA.webp" alt="PSA Logo" className="w-14 h-14 object-contain" />
             <div>
               <p className="font-serif text-lg text-psa-navy font-bold">PSA Aurora</p>
               <p className="text-xs text-slate-600 dark:text-slate-300 uppercase tracking-[0.12em]">Provincial Statistics Office</p>

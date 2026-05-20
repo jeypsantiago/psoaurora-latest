@@ -897,7 +897,7 @@ export const LandingPage: React.FC = () => {
             onError={() => setHeroBackgroundFailedSrc(heroBackgroundSource)}
           />
           <img
-            src="/PSA.png"
+            src="/PSA.webp"
             alt=""
             aria-hidden="true"
             className={`absolute right-[7%] top-[10%] w-52 sm:w-72 object-contain transition-opacity duration-500 ${heroBackgroundCanRender ? "opacity-0" : "opacity-20"}`}

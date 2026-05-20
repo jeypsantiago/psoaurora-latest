@@ -179,10 +179,6 @@ const SIDEBAR_SHELL_TRANSITION =
 const SIDEBAR_CONTENT_TRANSITION =
   "duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]";
 
-const prefetchChartVendor = () => {
-  void import("recharts");
-};
-
 interface LayoutProps {
   children: React.ReactNode;
 }
@@ -425,7 +421,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                   className={`h-10 w-10 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-sm overflow-hidden p-1 transition-[transform,box-shadow,border-color] ${SIDEBAR_CONTENT_TRANSITION} ${isSidebarExpanded ? "scale-100 shadow-[0_10px_24px_-18px_rgba(37,99,235,0.45)] dark:shadow-[0_10px_24px_-18px_rgba(0,0,0,0.6)]" : "scale-[0.98]"}`}
                 >
                   <img
-                    src="/PSA.png"
+                    src="/PSA.webp"
                     alt="Philippine Statistics Authority logo"
                     className="h-full w-full object-contain"
                   />
@@ -540,18 +536,6 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                         <button
                           type="button"
                           onClick={() => navigateToRoute(item.href)}
-                          onMouseEnter={
-                            item.href === "/dashboard" ||
-                            item.href === "/census"
-                              ? prefetchChartVendor
-                              : undefined
-                          }
-                          onFocus={
-                            item.href === "/dashboard" ||
-                            item.href === "/census"
-                              ? prefetchChartVendor
-                              : undefined
-                          }
                           title={isCompactSidebar ? item.label : undefined}
                           className={`group w-full flex items-center ${isCompactSidebar ? "justify-center px-0" : "justify-between px-3"} py-2.5 rounded-xl text-sm font-semibold transform-gpu transition-[background-color,color,box-shadow,transform] ${SIDEBAR_HOVER_TRANSITION} ${
                             isItemActive

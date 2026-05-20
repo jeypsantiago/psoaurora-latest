@@ -503,7 +503,7 @@ export const LandingTeamSection: React.FC<LandingTeamSectionProps> = ({
               >
                 <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_25%,rgba(0,86,179,0.10),transparent_42%),radial-gradient(circle_at_86%_20%,rgba(206,17,38,0.08),transparent_34%)]" />
                 <img
-                  src="/PSA.png"
+                  src="/PSA.webp"
                   alt=""
                   aria-hidden="true"
                   className="absolute inset-0 m-auto h-[98%] w-[98%] object-contain opacity-[0.16] saturate-0 contrast-75"
@@ -527,7 +527,7 @@ export const LandingTeamSection: React.FC<LandingTeamSectionProps> = ({
               >
                 <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_25%,rgba(0,86,179,0.10),transparent_42%),radial-gradient(circle_at_86%_20%,rgba(206,17,38,0.08),transparent_34%)]" />
                 <img
-                  src="/PSA.png"
+                  src="/PSA.webp"
                   alt=""
                   aria-hidden="true"
                   className="absolute inset-0 m-auto h-[98%] w-[98%] object-contain opacity-[0.16] saturate-0 contrast-75"
