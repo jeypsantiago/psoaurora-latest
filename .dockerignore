@@ -10,6 +10,7 @@ scripts/*
 !scripts/report-reminder-api.mjs
 !scripts/report-reminder-core.mjs
 !scripts/send-report-reminders.mjs
+!scripts/compress-dist-assets.mjs
 supabase
 README.md
 eslint.config.js
