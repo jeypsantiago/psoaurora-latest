@@ -81,6 +81,12 @@ import {
   type RegistryDocTypeConfig,
 } from "../services/registryRecords";
 import { fetchPublicAppStateRecord as fetchPublicBackendAppStateRecord } from "../services/publicAppState";
+import {
+  getDefaultRoleBadgeColor,
+  getRoleBadgeStyle,
+  ROLE_BADGE_COLOR_OPTIONS,
+  ROLE_BADGE_NEON_COLOR_OPTIONS,
+} from "../utils/roleBadges";
 
 const loadSecurityAccessTab = () =>
   import("./settings/SecurityAccessTab").then((module) => ({
@@ -180,76 +186,6 @@ const DEFAULT_DOC_FIELDS: Record<string, FormField[]> = {
     { id: "9", label: "Date of Death", type: "date", required: true },
   ],
   cenomar: [{ id: "10", label: "Subject Name", type: "text", required: true }],
-};
-
-const ROLE_BADGE_COLOR_HEX: Record<string, string> = {
-  slate: "#334155",
-  gray: "#374151",
-  zinc: "#3f3f46",
-  neutral: "#404040",
-  stone: "#44403c",
-  red: "#b91c1c",
-  orange: "#c2410c",
-  amber: "#b45309",
-  yellow: "#a16207",
-  lime: "#4d7c0f",
-  green: "#15803d",
-  emerald: "#047857",
-  teal: "#0f766e",
-  cyan: "#0e7490",
-  sky: "#0369a1",
-  blue: "#1d4ed8",
-  indigo: "#4338ca",
-  violet: "#6d28d9",
-  purple: "#7e22ce",
-  fuchsia: "#a21caf",
-  pink: "#be185d",
-  rose: "#be123c",
-  neon_blue: "#00ccff",
-  neon_pink: "#ff00a0",
-  neon_green: "#39ff14",
-  neon_purple: "#bc13fe",
-  hot_orange: "#ff5300",
-  bright_yellow: "#ffeb00",
-  magenta: "#ff00ff",
-  cyber_yellow: "#ffd300",
-  electric_lime: "#ccff00",
-  fluorescent_blue: "#15f2d6",
-  laser_lemon: "#ffff66",
-  neon_cyan: "#00ffff",
-  neon_red: "#ff003c",
-  neon_orange: "#ff9900",
-  plasma_pink: "#ff0099",
-  toxic_green: "#66ff00",
-  uranium_green: "#00ff33",
-  vivid_violet: "#9f00ff",
-  proton_purple: "#8a2be2",
-  hyper_pink: "#ff1493",
-  radiant_red: "#ff3131",
-  electric_indigo: "#6f00ff",
-  chartreuse_yellow: "#dfff00",
-  aquamarine: "#7fffd4",
-  spring_green: "#00fa9a",
-};
-
-const hexToRgba = (hex: string, alpha: number): string => {
-  const normalized = hex.replace("#", "");
-  if (normalized.length !== 6) return `rgba(29, 78, 216, ${alpha})`;
-
-  const r = parseInt(normalized.slice(0, 2), 16);
-  const g = parseInt(normalized.slice(2, 4), 16);
-  const b = parseInt(normalized.slice(4, 6), 16);
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-};
-
-const getRoleBadgeStyle = (badgeColor?: string): React.CSSProperties => {
-  const baseColor =
-    ROLE_BADGE_COLOR_HEX[badgeColor || "blue"] || ROLE_BADGE_COLOR_HEX.blue;
-  return {
-    color: baseColor,
-    backgroundColor: hexToRgba(baseColor, 0.12),
-    borderColor: hexToRgba(baseColor, 0.28),
-  };
 };
 
 const SettingsTabFallback: React.FC<{ label: string }> = ({ label }) => (
@@ -909,7 +845,7 @@ export const SettingsPage: React.FC = () => {
     name: "",
     description: "",
     permissions: [],
-    badgeColor: "blue",
+    badgeColor: getDefaultRoleBadgeColor("", 0),
   });
 
   // -- Feedback State --
@@ -3265,7 +3201,7 @@ export const SettingsPage: React.FC = () => {
       name: "",
       description: "",
       permissions: [],
-      badgeColor: "blue",
+      badgeColor: getDefaultRoleBadgeColor("", roles.length),
     });
     setIsRoleModalOpen(true);
   };
@@ -4140,54 +4076,17 @@ export const SettingsPage: React.FC = () => {
                   }
                   className="w-full bg-white dark:bg-zinc-950/70 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500/40 transition-all"
                 >
-                  <option value="slate">Slate</option>
-                  <option value="gray">Gray</option>
-                  <option value="zinc">Zinc</option>
-                  <option value="neutral">Neutral</option>
-                  <option value="stone">Stone</option>
-                  <option value="red">Red</option>
-                  <option value="orange">Orange</option>
-                  <option value="amber">Amber</option>
-                  <option value="yellow">Yellow</option>
-                  <option value="lime">Lime</option>
-                  <option value="green">Green</option>
-                  <option value="emerald">Emerald</option>
-                  <option value="teal">Teal</option>
-                  <option value="cyan">Cyan</option>
-                  <option value="sky">Sky</option>
-                  <option value="blue">Blue</option>
-                  <option value="indigo">Indigo</option>
-                  <option value="violet">Violet</option>
-                  <option value="purple">Purple</option>
-                  <option value="fuchsia">Fuchsia</option>
-                  <option value="pink">Pink</option>
-                  <option value="rose">Rose</option>
+                  {ROLE_BADGE_COLOR_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
                   <optgroup label="Bright & Neon">
-                    <option value="neon_blue">Neon Blue</option>
-                    <option value="neon_pink">Neon Pink</option>
-                    <option value="neon_green">Neon Green</option>
-                    <option value="neon_purple">Neon Purple</option>
-                    <option value="hot_orange">Hot Orange</option>
-                    <option value="bright_yellow">Bright Yellow</option>
-                    <option value="magenta">Magenta</option>
-                    <option value="cyber_yellow">Cyber Yellow</option>
-                    <option value="electric_lime">Electric Lime</option>
-                    <option value="fluorescent_blue">Fluorescent Blue</option>
-                    <option value="laser_lemon">Laser Lemon</option>
-                    <option value="neon_cyan">Neon Cyan</option>
-                    <option value="neon_red">Neon Red</option>
-                    <option value="neon_orange">Neon Orange</option>
-                    <option value="plasma_pink">Plasma Pink</option>
-                    <option value="toxic_green">Toxic Green</option>
-                    <option value="uranium_green">Uranium Green</option>
-                    <option value="vivid_violet">Vivid Violet</option>
-                    <option value="proton_purple">Proton Purple</option>
-                    <option value="hyper_pink">Hyper Pink</option>
-                    <option value="radiant_red">Radiant Red</option>
-                    <option value="electric_indigo">Electric Indigo</option>
-                    <option value="chartreuse_yellow">Chartreuse Yellow</option>
-                    <option value="aquamarine">Aquamarine</option>
-                    <option value="spring_green">Spring Green</option>
+                    {ROLE_BADGE_NEON_COLOR_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
                   </optgroup>
                 </select>
               </div>

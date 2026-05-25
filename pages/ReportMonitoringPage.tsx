@@ -187,13 +187,20 @@ export const ReportMonitoringPage: React.FC = () => {
     emptyReportForm(projects),
   );
 
-  const usersById = useMemo(() => {
-    const map = new Map(users.map((user) => [user.id, user]));
+  const usersById = useMemo<Map<string, User>>(() => {
+    const map = new Map<string, User>(users.map((user) => [user.id, user]));
     if (currentUser?.id) {
       map.set(currentUser.id, currentUser);
     }
     return map;
   }, [currentUser, users]);
+  const focalPersonOptions = useMemo<User[]>(
+    () =>
+      Array.from(usersById.values() as Iterable<User>).sort((a: User, b: User) =>
+        (a.name || a.email || "").localeCompare(b.name || b.email || ""),
+      ),
+    [usersById],
+  );
   const projectsById = useMemo(
     () => new Map(projects.map((project) => [project.id, project])),
     [projects],
@@ -711,9 +718,13 @@ export const ReportMonitoringPage: React.FC = () => {
       toast("error", "You do not have permission to edit this project.");
       return;
     }
-    const focalUserId = existingProject?.focalUserId || currentUserId;
+    const focalUserId = projectForm.focalUserId || currentUserId;
     if (!name || !focalUserId) {
       toast("error", "Project name and focal person are required.");
+      return;
+    }
+    if (!usersById.has(focalUserId)) {
+      toast("error", "Select a valid registered focal person.");
       return;
     }
     const now = new Date().toISOString();
@@ -1581,25 +1592,28 @@ export const ReportMonitoringPage: React.FC = () => {
 
       <div className="rounded-xl border border-zinc-200 bg-white p-2.5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
         <div className="flex flex-col gap-2 2xl:flex-row 2xl:items-center 2xl:justify-between">
-          <div className="flex w-fit items-center gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-zinc-900">
-            {[
-              { id: "projects", label: "Projects", icon: FolderKanban },
-              { id: "all", label: "All Reports", icon: ClipboardCheck },
-              { id: "due-soon", label: "Due Soon", icon: Bell },
-            ].map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setActiveTab(tab.id as ViewTab)}
-                className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-bold uppercase tracking-wide transition-colors ${
-                  activeTab === tab.id
-                    ? "bg-white text-blue-700 shadow-sm dark:bg-zinc-800 dark:text-blue-300"
-                    : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
-                }`}
-              >
-                <tab.icon size={13} /> {tab.label}
-              </button>
-            ))}
+          <div className="max-w-full min-w-0">
+            <div className="flex w-full min-w-0 flex-nowrap items-center gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-zinc-900">
+              {[
+                { id: "projects", label: "Projects", icon: FolderKanban },
+                { id: "all", label: "All Reports", icon: ClipboardCheck },
+                { id: "due-soon", label: "Due Soon", icon: Bell },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setActiveTab(tab.id as ViewTab)}
+                  className={`inline-flex min-w-0 flex-1 shrink items-center justify-center gap-1 whitespace-nowrap rounded-md px-1.5 py-1.5 text-[clamp(8px,0.72vw,11px)] font-bold uppercase tracking-wide transition-colors sm:px-2 lg:gap-1.5 xl:px-3 ${
+                    activeTab === tab.id
+                      ? "bg-white text-blue-700 shadow-sm dark:bg-zinc-800 dark:text-blue-300"
+                      : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+                  }`}
+                >
+                  <tab.icon size={12} className="shrink-0" />
+                  <span className="whitespace-nowrap">{tab.label}</span>
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="grid grid-cols-1 gap-1.5 md:grid-cols-2 xl:grid-cols-5">
@@ -1977,9 +1991,18 @@ export const ReportMonitoringPage: React.FC = () => {
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <label className={fieldLabelClass}>Focal Person</label>
-                <div className="flex h-10 items-center rounded-lg border border-zinc-300 bg-zinc-50 px-3 text-[13px] font-semibold text-zinc-800 dark:border-zinc-700 dark:bg-zinc-900/50 dark:text-zinc-100">
-                  {usersById.get(projectForm.focalUserId)?.name || currentUser?.name || "Your account"}
-                </div>
+                <select
+                  value={projectForm.focalUserId}
+                  onChange={(event) => setProjectForm({ ...projectForm, focalUserId: event.target.value })}
+                  className={selectClass}
+                >
+                  {focalPersonOptions.map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.name || user.email}
+                      {user.position ? ` - ${user.position}` : ""}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="space-y-1.5">
                 <label className={fieldLabelClass}>Default Frequency</label>

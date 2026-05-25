@@ -15,6 +15,7 @@ import {
   readFastLoginSession,
   writeFastLoginSession,
 } from './services/fastLoginCache';
+import { normalizeRoleBadgeColor } from './utils/roleBadges';
 
 export interface Role {
   id: string;
@@ -35,6 +36,7 @@ export interface User {
   password?: string;
   lastAccess: string;
   avatar?: string;
+  avatarSrcSet?: string;
   signature?: string;
   avatarFileId?: string;
   signatureFileId?: string;
@@ -118,18 +120,26 @@ const DEFAULT_ROLES: Role[] = [
     name: 'Report Contributor',
     description: 'Self-service access to create and maintain owned report monitoring projects and schedules.',
     permissions: ['dashboard.view', 'reports.view', 'reports.view_all', 'reports.edit'],
-    badgeColor: 'emerald',
+    badgeColor: 'violet',
   },
 ];
 
 const ensureDefaultRoles = (roles: Role[]): Role[] => {
-  const updatedRoles = roles.map((role) => {
+  const updatedRoles = roles.map((role, index) => {
     const defaultRole = DEFAULT_ROLES.find((r) => r.name === role.name);
+    const badgeColor = normalizeRoleBadgeColor(
+      role.badgeColor,
+      role.name,
+      index,
+    );
     if (defaultRole) {
       const nextPermissions = Array.from(new Set([...role.permissions, ...defaultRole.permissions]));
-      if (nextPermissions.length !== role.permissions.length) {
-        return { ...role, permissions: nextPermissions };
+      if (nextPermissions.length !== role.permissions.length || badgeColor !== role.badgeColor) {
+        return { ...role, permissions: nextPermissions, badgeColor };
       }
+    }
+    if (badgeColor !== role.badgeColor) {
+      return { ...role, badgeColor };
     }
     return role;
   });
@@ -170,15 +180,26 @@ const extractSingleFileName = (value: unknown): string => {
   return '';
 };
 
-const toRecordFileUrl = (record: any, fieldName: string): string => {
+const toRecordFileUrl = (
+  record: any,
+  fieldName: string,
+  options?: Record<string, string>,
+): string => {
   const filename = extractSingleFileName(record?.[fieldName]);
   if (!filename) return '';
 
   try {
-    return backend.files.getURL(record, filename);
+    return backend.files.getURL(record, filename, options);
   } catch {
     return '';
   }
+};
+
+const toAvatarSrcSet = (record: any): string => {
+  const oneX = toRecordFileUrl(record, 'avatar', { thumb: '80x80' });
+  const twoX = toRecordFileUrl(record, 'avatar', { thumb: '160x160' });
+  if (oneX && twoX) return `${oneX} 1x, ${twoX} 2x`;
+  return '';
 };
 
 const normalizeRoles = (value: unknown): string[] => {
@@ -215,6 +236,7 @@ const normalizeRoles = (value: unknown): string[] => {
 
 const fromAuthRecord = (record: any): User => {
   const avatarUrl = (typeof record.avatar === 'string' ? record.avatar : '') || toRecordFileUrl(record, 'avatar');
+  const avatarSrcSet = (typeof record.avatarSrcSet === 'string' ? record.avatarSrcSet : '') || toAvatarSrcSet(record);
   const signatureUrl = (typeof record.signature === 'string' ? record.signature : '') || toRecordFileUrl(record, 'signature');
   const prefsBundle = record?.prefsBundle && typeof record.prefsBundle === 'object' && !Array.isArray(record.prefsBundle)
     ? record.prefsBundle
@@ -230,6 +252,7 @@ const fromAuthRecord = (record: any): User => {
     position: record.position || '',
     lastAccess: record.lastAccess || 'Never',
     avatar: avatarUrl,
+    avatarSrcSet,
     signature: signatureUrl,
     avatarFileId: typeof record.avatarFileId === 'string' ? record.avatarFileId : '',
     signatureFileId: typeof record.signatureFileId === 'string' ? record.signatureFileId : '',
@@ -260,7 +283,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (parsed) {
       const merged = ensureDefaultRoles(parsed);
       setRoles(merged);
-      if (merged.length !== parsed.length) {
+      if (JSON.stringify(merged) !== JSON.stringify(parsed)) {
         writeStorageJson(STORAGE_KEYS.roles, merged);
       }
       return merged;
@@ -557,6 +580,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const addRole = useCallback(async (roleData: Omit<Role, 'id'>) => {
     const nextRole: Role = {
       ...roleData,
+      badgeColor: normalizeRoleBadgeColor(roleData.badgeColor, roleData.name, roles.length),
       id: Date.now().toString(),
     };
 
@@ -565,11 +589,23 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
       writeStorageJson(STORAGE_KEYS.roles, next);
       return next;
     });
-  }, []);
+  }, [roles.length]);
 
   const updateRole = useCallback(async (id: string, roleData: Partial<Role>) => {
     setRoles((prev) => {
-      const next = prev.map((role) => (role.id === id ? { ...role, ...roleData } : role));
+      const next = prev.map((role, index) => {
+        if (role.id !== id) return role;
+
+        const merged = { ...role, ...roleData };
+        return {
+          ...merged,
+          badgeColor: normalizeRoleBadgeColor(
+            merged.badgeColor,
+            merged.name,
+            index,
+          ),
+        };
+      });
       writeStorageJson(STORAGE_KEYS.roles, next);
       return next;
     });

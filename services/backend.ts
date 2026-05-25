@@ -76,6 +76,10 @@ const mapUserRecord = (row: AnyRecord | null): AnyRecord | null => {
 
   const avatarFile = firstFileName(row.avatar);
   const signatureFile = firstFileName(row.signature);
+  const avatarUrl = avatarFile ? pb.files.getURL(row as RecordModel, avatarFile) : '';
+  const avatarSrcSet = avatarFile
+    ? `${pb.files.getURL(row as RecordModel, avatarFile, { thumb: '80x80' })} 1x, ${pb.files.getURL(row as RecordModel, avatarFile, { thumb: '160x160' })} 2x`
+    : '';
 
   return {
     id: String(row.id || ''),
@@ -86,7 +90,8 @@ const mapUserRecord = (row: AnyRecord | null): AnyRecord | null => {
     position: row.position || '',
     prefsBundle: asObject(row.prefsBundle),
     lastAccess: row.lastAccess || 'Never',
-    avatar: avatarFile ? pb.files.getURL(row as RecordModel, avatarFile) : '',
+    avatar: avatarUrl,
+    avatarSrcSet,
     signature: signatureFile ? pb.files.getURL(row as RecordModel, signatureFile) : '',
     avatarFileId: avatarFile,
     signatureFileId: signatureFile,
@@ -443,10 +448,10 @@ export const backend = {
     },
   },
   files: {
-    getURL(record: AnyRecord, fieldName: string) {
+    getURL(record: AnyRecord, fieldName: string, options?: Record<string, string>) {
       const raw = record?._raw || record;
       if (!raw) return '';
-      return pb.files.getURL(raw as RecordModel, fieldName);
+      return pb.files.getURL(raw as RecordModel, fieldName, options);
     },
   },
   filter(value: string, params: Record<string, unknown>) {

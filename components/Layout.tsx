@@ -22,6 +22,7 @@ import { useUsers } from "../UserContext";
 import { useRbac } from "../RbacContext";
 import { STORAGE_KEYS } from "../constants/storageKeys";
 import { readStorageString, setStorageItem } from "../services/storage";
+import { getRoleBadgeStyle } from "../utils/roleBadges";
 
 interface SidebarChildItem {
   id: string;
@@ -363,8 +364,11 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     : "??";
 
   const primaryRole = currentUser?.roles?.[0] || "Viewer";
-  const primaryRoleColor =
-    roles.find((role) => role.name === primaryRole)?.badgeColor || "zinc";
+  const primaryRoleBadgeStyle = getRoleBadgeStyle(
+    roles.find((role) => role.name === primaryRole)?.badgeColor,
+  );
+  const headerAvatarSrc = currentUser?.avatar || "";
+  const headerAvatarSrcSet = currentUser?.avatarSrcSet || undefined;
 
   const activeTabParam = new URLSearchParams(location.search).get("tab") || "";
 
@@ -898,8 +902,14 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                 <div className="h-10 w-10 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center border border-zinc-200 dark:border-zinc-700 shadow-md overflow-hidden transition-all group-hover:shadow-lg">
                   {currentUser?.avatar ? (
                     <img
-                      src={currentUser.avatar}
+                      src={headerAvatarSrc}
+                      srcSet={headerAvatarSrcSet}
+                      sizes="40px"
                       alt={currentUser.name || "Profile avatar"}
+                      width={40}
+                      height={40}
+                      decoding="async"
+                      fetchPriority="high"
                       className="h-full w-full object-cover"
                     />
                   ) : (
@@ -930,7 +940,8 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                       </p>
                       <div className="mt-1.5">
                         <span
-                          className={`inline-flex max-w-full truncate px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-wider bg-${primaryRoleColor}-50 text-${primaryRoleColor}-700 border border-${primaryRoleColor}-100 dark:bg-${primaryRoleColor}-500/10 dark:text-${primaryRoleColor}-400 dark:border-${primaryRoleColor}-500/20`}
+                          style={primaryRoleBadgeStyle}
+                          className="inline-flex max-w-full truncate rounded-full border px-2 py-0.5 text-[8px] font-black uppercase tracking-wider"
                         >
                           {primaryRole}
                         </span>

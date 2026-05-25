@@ -21,9 +21,9 @@ import {
   UploadProgressInline,
 } from "../components/ui";
 import { useToast } from "../ToastContext";
-import { useFileUpload } from "../hooks/useFileUpload";
 import { useTheme } from "../theme-context";
 import { Theme } from "../types";
+import { getRoleBadgeStyle } from "../utils/roleBadges";
 
 type SignaturePoint = {
   x: number;
@@ -37,6 +37,11 @@ type SignatureStroke = {
 type UploadNoticeState = {
   visible: boolean;
   tone: "success" | "error";
+  message: string;
+};
+
+type SaveStatusState = {
+  status: "idle" | "saving" | "success" | "error";
   message: string;
 };
 
@@ -151,6 +156,15 @@ export const ProfilePage: React.FC = () => {
   const [avatarUploadNotice, setAvatarUploadNotice] =
     useState<UploadNoticeState | null>(null);
   const [avatarPreviewUrl, setAvatarPreviewUrl] = useState("");
+  const [avatarSaveStatus, setAvatarSaveStatus] = useState<SaveStatusState>({
+    status: "idle",
+    message: "",
+  });
+  const [signatureSaveStatus, setSignatureSaveStatus] =
+    useState<SaveStatusState>({
+      status: "idle",
+      message: "",
+    });
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
@@ -161,17 +175,8 @@ export const ProfilePage: React.FC = () => {
   const activePointerIdRef = useRef<number | null>(null);
   const isDrawingRef = useRef(false);
   const renderFrameRef = useRef<number | null>(null);
-  const avatarUpload = useFileUpload("staff-avatar", {
-    ownerUserId: currentUser?.id || "",
-  });
-  const signatureUpload = useFileUpload("staff-signature", {
-    ownerUserId: currentUser?.id || "",
-  });
-
-  const primeMediaUpload = useCallback(() => {
-    void avatarUpload.prepare();
-    void signatureUpload.prepare();
-  }, [avatarUpload, signatureUpload]);
+  const isAvatarSaving = avatarSaveStatus.status === "saving";
+  const isSignatureSaving = signatureSaveStatus.status === "saving";
 
   const clearAvatarUploadNotice = useCallback(() => {
     if (avatarNoticeTimerRef.current !== null) {
@@ -294,10 +299,10 @@ export const ProfilePage: React.FC = () => {
   );
 
   const openSignatureDrawModal = useCallback(() => {
+    if (isSignatureSaving) return;
     setSignatureMode("draw");
     setIsSignatureDrawModalOpen(true);
-    void signatureUpload.prepare();
-  }, [signatureUpload]);
+  }, [isSignatureSaving]);
 
   const closeSignatureDrawModal = useCallback(() => {
     stopActiveDrawing();
@@ -385,56 +390,65 @@ export const ProfilePage: React.FC = () => {
     scheduleSignatureCanvasRender();
   }, [scheduleSignatureCanvasRender, stopActiveDrawing]);
 
-  const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file && currentUser) {
-      updateAvatarPreview(file);
-      clearAvatarUploadNotice();
-      setAvatarUploadNotice(null);
-      void avatarUpload
-        .start(file)
-        .then((uploaded) =>
-          updateUser(currentUser.id, {
-            avatarFileId: uploaded.fileId,
-            avatarPath: uploaded.objectKey,
-            avatar: uploaded.url,
-          }),
-        )
-        .then(() => {
-          revokeAvatarPreviewObjectUrl();
-          setAvatarPreviewUrl("");
-          avatarUpload.clearStatus();
-          showAvatarUploadNotice("success", "Profile picture updated.");
-          toast("success", "Profile picture updated successfully.");
-          return alert("Profile picture updated successfully!");
-        })
-        .catch((error: any) => {
-          revokeAvatarPreviewObjectUrl();
-          setAvatarPreviewUrl("");
-          avatarUpload.clearStatus();
-          const message = error?.message || "Unable to update profile picture.";
-          showAvatarUploadNotice("error", message, 5200);
-          toast("error", message);
-          return alert(message);
-        });
-    }
-
     e.target.value = "";
+
+    if (!file || !currentUser || isAvatarSaving) return;
+
+    updateAvatarPreview(file);
+    clearAvatarUploadNotice();
+    setAvatarUploadNotice(null);
+    setAvatarSaveStatus({
+      status: "saving",
+      message: "Saving profile picture...",
+    });
+
+    try {
+      await updateUser(currentUser.id, { avatarFile: file });
+      revokeAvatarPreviewObjectUrl();
+      setAvatarPreviewUrl("");
+      setAvatarSaveStatus({
+        status: "success",
+        message: "Profile picture updated.",
+      });
+      showAvatarUploadNotice("success", "Profile picture updated.");
+      toast("success", "Profile picture updated successfully.");
+      await alert("Profile picture updated successfully!");
+    } catch (error: any) {
+      revokeAvatarPreviewObjectUrl();
+      setAvatarPreviewUrl("");
+      const message = error?.message || "Unable to update profile picture.";
+      setAvatarSaveStatus({ status: "error", message });
+      showAvatarUploadNotice("error", message, 5200);
+      toast("error", message);
+      await alert(message);
+    }
   };
 
   const saveDrawnSignature = async () => {
     if (!currentUser) return;
+    if (isSignatureSaving) return;
     if (signatureStrokesRef.current.length === 0) {
       await alert("Add your signature first before saving.");
       return;
     }
 
+    setSignatureSaveStatus({
+      status: "saving",
+      message: "Saving signature...",
+    });
+
     const exportCanvas = document.createElement("canvas");
-    exportCanvas.width = 1600;
-    exportCanvas.height = 700;
+    exportCanvas.width = 900;
+    exportCanvas.height = 360;
 
     const exportContext = exportCanvas.getContext("2d");
     if (!exportContext) {
+      setSignatureSaveStatus({
+        status: "error",
+        message: "Unable to prepare the signature pad for saving.",
+      });
       await alert(
         "Unable to prepare the signature pad for saving. Please try again.",
       );
@@ -468,25 +482,61 @@ export const ProfilePage: React.FC = () => {
     });
 
     if (!signatureFile) {
+      setSignatureSaveStatus({
+        status: "error",
+        message: "Unable to generate signature image.",
+      });
       await alert("Unable to generate signature image. Please try again.");
       return;
     }
 
     try {
-      const uploaded = await signatureUpload.start(signatureFile);
-      await updateUser(currentUser.id, {
-        signatureFileId: uploaded.fileId,
-        signaturePath: uploaded.objectKey,
-        signature: uploaded.url,
-      });
+      await updateUser(currentUser.id, { signatureFile });
       setHasSignatureInk(signatureStrokesRef.current.length > 0);
       setHasUnsavedSignatureDraft(false);
       closeSignatureDrawModal();
-      signatureUpload.clearStatus();
+      setSignatureSaveStatus({
+        status: "success",
+        message: "Signature saved successfully.",
+      });
+      toast("success", "Signature saved successfully.");
       await alert("Signature saved successfully!");
     } catch (error: any) {
-      signatureUpload.clearStatus();
-      await alert(error?.message || "Unable to save signature.");
+      const message = error?.message || "Unable to save signature.";
+      setSignatureSaveStatus({ status: "error", message });
+      toast("error", message);
+      await alert(message);
+    }
+  };
+
+  const handleSignatureFileUpload = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+
+    if (!file || !currentUser || isSignatureSaving) return;
+
+    setSignatureSaveStatus({
+      status: "saving",
+      message: "Saving signature...",
+    });
+
+    try {
+      await updateUser(currentUser.id, { signatureFile: file });
+      setHasSignatureInk(false);
+      setHasUnsavedSignatureDraft(false);
+      setSignatureSaveStatus({
+        status: "success",
+        message: "Signature uploaded successfully.",
+      });
+      toast("success", "Signature uploaded successfully.");
+      await alert("Signature uploaded successfully!");
+    } catch (error: any) {
+      const message = error?.message || "Unable to upload signature.";
+      setSignatureSaveStatus({ status: "error", message });
+      toast("error", message);
+      await alert(message);
     }
   };
 
@@ -550,12 +600,6 @@ export const ProfilePage: React.FC = () => {
     [revokeAvatarPreviewObjectUrl],
   );
 
-  useEffect(() => {
-    if (!currentUser?.id) return;
-    void avatarUpload.prepare();
-    void signatureUpload.prepare();
-  }, [avatarUpload, currentUser?.id, signatureUpload]);
-
   const handleUpdateProfile = async () => {
     if (currentUser) {
       try {
@@ -569,7 +613,7 @@ export const ProfilePage: React.FC = () => {
 
   const primaryRole = currentUser?.roles?.[0] || "Viewer";
   const userRole = roles.find((r) => r.name === primaryRole);
-  const badgeColor = userRole?.badgeColor || "zinc";
+  const primaryRoleBadgeStyle = getRoleBadgeStyle(userRole?.badgeColor);
   const avatarInitials = currentUser?.name
     ? currentUser.name
         .split(" ")
@@ -601,6 +645,7 @@ export const ProfilePage: React.FC = () => {
                   ref={avatarInputRef}
                   onChange={handleAvatarUpload}
                   accept="image/*"
+                  disabled={isAvatarSaving}
                   className="hidden"
                 />
 
@@ -609,7 +654,7 @@ export const ProfilePage: React.FC = () => {
                     <img
                       src={avatarDisplaySource}
                       alt={currentUser.name}
-                      className={`h-full w-full object-cover ${avatarUpload.isUploading ? "opacity-80" : ""}`}
+                      className={`h-full w-full object-cover ${isAvatarSaving ? "opacity-80" : ""}`}
                     />
                   ) : (
                     <span className="absolute inset-0 flex items-center justify-center text-2xl font-black text-psa-navy dark:text-white">
@@ -619,21 +664,21 @@ export const ProfilePage: React.FC = () => {
                 </div>
 
                 <button
-                  onPointerDown={primeMediaUpload}
                   onClick={() => avatarInputRef.current?.click()}
-                  className="absolute -bottom-1 right-0 inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/25 bg-zinc-900/85 text-white shadow-[0_10px_22px_rgba(2,6,23,0.42)] backdrop-blur-sm hover:bg-zinc-800 transition-colors"
+                  disabled={isAvatarSaving}
+                  className="absolute -bottom-1 right-0 inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/25 bg-zinc-900/85 text-white shadow-[0_10px_22px_rgba(2,6,23,0.42)] backdrop-blur-sm hover:bg-zinc-800 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <Camera size={15} />
                 </button>
               </div>
 
-              {(avatarUpload.isUploading || avatarUploadNotice?.visible) && (
+              {(isAvatarSaving || avatarUploadNotice?.visible) && (
                 <div className="w-36 sm:w-44">
-                  {avatarUpload.isUploading ? (
+                  {isAvatarSaving ? (
                     <UploadProgressInline
                       visible
-                      message={avatarUpload.message}
-                      progressPercent={avatarUpload.progressPercent}
+                      message={avatarSaveStatus.message}
+                      progressPercent={65}
                       tone="neutral"
                       showProgress
                     />
@@ -654,11 +699,8 @@ export const ProfilePage: React.FC = () => {
                   {currentUser?.name}
                 </h1>
                 <div
-                  className={`
-                px-4 py-1 rounded-full text-[10px] font-black uppercase tracking-[0.2em] w-fit mx-auto lg:mx-0
-                bg-${badgeColor}-50 text-${badgeColor}-700 border border-${badgeColor}-100
-                dark:bg-${badgeColor}-500/10 dark:text-${badgeColor}-400 dark:border-${badgeColor}-500/20
-              `}
+                  style={primaryRoleBadgeStyle}
+                  className="w-fit rounded-full border px-4 py-1 text-[10px] font-black uppercase tracking-[0.2em] mx-auto lg:mx-0"
                 >
                   {primaryRole}
                 </div>
@@ -822,37 +864,10 @@ export const ProfilePage: React.FC = () => {
                   <input
                     type="file"
                     accept="image/*"
+                    disabled={isSignatureSaving}
                     className="absolute inset-0 opacity-0 cursor-pointer z-10"
-                    onClick={() => {
-                      primeMediaUpload();
-                      void signatureUpload.prepare();
-                    }}
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) {
-                        if (currentUser) {
-                          void signatureUpload
-                            .start(file)
-                            .then((uploaded) =>
-                              updateUser(currentUser.id, {
-                                signatureFileId: uploaded.fileId,
-                                signaturePath: uploaded.objectKey,
-                                signature: uploaded.url,
-                              }),
-                            )
-                            .then(() => {
-                              signatureUpload.clearStatus();
-                              return alert("Signature uploaded successfully!");
-                            })
-                            .catch((error: any) =>
-                              alert(
-                                error?.message || "Unable to upload signature.",
-                              ),
-                            );
-                        }
-                      }
-
-                      e.target.value = "";
+                    onChange={(event) => {
+                      void handleSignatureFileUpload(event);
                     }}
                   />
                   {currentUser?.signature ? (
@@ -928,14 +943,17 @@ export const ProfilePage: React.FC = () => {
                 </div>
               )}
               <UploadProgressInline
-                visible={
-                  signatureUpload.isUploading ||
-                  signatureUpload.status === "error"
+                visible={signatureSaveStatus.status !== "idle"}
+                message={signatureSaveStatus.message}
+                progressPercent={isSignatureSaving ? 65 : 100}
+                tone={
+                  signatureSaveStatus.status === "error"
+                    ? "error"
+                    : signatureSaveStatus.status === "success"
+                      ? "success"
+                      : "neutral"
                 }
-                message={signatureUpload.message || signatureUpload.error}
-                progressPercent={signatureUpload.progressPercent}
-                tone={signatureUpload.tone}
-                showProgress={signatureUpload.isUploading}
+                showProgress={isSignatureSaving}
                 className="mt-3"
               />
             </Card>
@@ -981,6 +999,7 @@ export const ProfilePage: React.FC = () => {
             <Button
               variant="ghost"
               onClick={closeSignatureDrawModal}
+              disabled={isSignatureSaving}
               className="min-w-[112px] uppercase tracking-[0.12em] text-[11px]"
             >
               Cancel
@@ -988,7 +1007,7 @@ export const ProfilePage: React.FC = () => {
             <Button
               variant="outline"
               onClick={clearSignature}
-              disabled={!hasSignatureInk}
+              disabled={!hasSignatureInk || isSignatureSaving}
               className="min-w-[112px] uppercase tracking-[0.12em] text-[11px]"
             >
               <Trash2 size={14} className="mr-2" /> Clear
@@ -998,23 +1017,24 @@ export const ProfilePage: React.FC = () => {
               onClick={() => {
                 void saveDrawnSignature();
               }}
-              disabled={!currentUser || !hasSignatureInk}
+              disabled={!currentUser || !hasSignatureInk || isSignatureSaving}
               className="min-w-[148px] uppercase tracking-[0.12em] text-[11px] shadow-lg shadow-blue-500/20"
             >
-              <Save size={14} className="mr-2" /> Save Signature
+              <Save size={14} className="mr-2" />{" "}
+              {isSignatureSaving ? "Saving..." : "Save Signature"}
             </Button>
           </>
         }
       >
         <div className="flex h-full flex-col bg-zinc-50/70 dark:bg-zinc-950/60">
           <div className="border-b border-zinc-200/80 dark:border-zinc-800 px-6 py-4">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <p className="text-sm font-medium leading-relaxed text-zinc-600 dark:text-zinc-300">
-                Use your finger, mouse, or stylus to sign in the centered pad.
-                The draft stays on this device until you clear it or save it.
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="min-w-0 text-sm font-medium leading-relaxed text-zinc-600 dark:text-zinc-300">
+                Sign with mouse, finger, or stylus. Your draft stays here until
+                saved or cleared.
               </p>
               <span
-                className={`inline-flex w-fit items-center rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] ${
+                className={`inline-flex w-fit shrink-0 items-center rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] ${
                   hasUnsavedSignatureDraft
                     ? "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300"
                     : hasSignatureInk

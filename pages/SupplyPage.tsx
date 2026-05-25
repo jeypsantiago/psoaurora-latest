@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback } from "react";
+import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   ShoppingCart,
@@ -93,6 +93,7 @@ interface SupplyRequest {
   approverId?: string;
   issuedById?: string;
   receivedById?: string;
+  stockDeducted?: boolean;
 }
 
 type ImportColumnKey = "itemName" | "unit" | "quantity" | "reorderPoint";
@@ -197,6 +198,101 @@ const parseImportNumber = (value: unknown): number => {
 
 const normalizeInventoryName = (value: string): string =>
   value.trim().toLowerCase().replace(/\s+/g, " ");
+
+const toSafeStockNumber = (value: unknown): number => {
+  const numeric =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value.replace(/,/g, "").trim())
+        : 0;
+  return Number.isFinite(numeric) ? Math.max(0, Math.round(numeric)) : 0;
+};
+
+const normalizeInventoryItem = (item: InventoryItem): InventoryItem => ({
+  ...item,
+  name: String(item.name || "Unnamed Item"),
+  unit: String(item.unit || "Units"),
+  physicalQty: toSafeStockNumber(item.physicalQty),
+  pendingQty: toSafeStockNumber(item.pendingQty),
+  reorderPoint: toSafeStockNumber(item.reorderPoint),
+});
+
+const normalizeSupplyRequest = (request: SupplyRequest): SupplyRequest => {
+  const source =
+    request && typeof request === "object"
+      ? (request as Partial<SupplyRequest>)
+      : {};
+
+  return {
+    id: String(source.id || ""),
+    purpose: String(source.purpose || ""),
+    status: (source.status || "For Verification") as RequestStatus,
+    date: String(source.date || ""),
+    requester: String(source.requester || "Unknown"),
+    requesterId: String(source.requesterId || "unknown"),
+    approverId: source.approverId,
+    issuedById: source.issuedById,
+    receivedById: source.receivedById,
+    stockDeducted: Boolean(source.stockDeducted),
+    items: (Array.isArray(source.items) ? source.items : []).map((item) => {
+    const requestedQty = toSafeStockNumber(item.requestedQty ?? item.qty);
+    const qty = toSafeStockNumber(item.qty ?? requestedQty);
+    return {
+      ...item,
+      name: String(item.name || "Unnamed Item"),
+      unit: String(item.unit || "Units"),
+      qty,
+      requestedQty,
+    };
+    }),
+  };
+};
+
+const getAvailableQty = (item: InventoryItem): number =>
+  Math.max(toSafeStockNumber(item.physicalQty) - toSafeStockNumber(item.pendingQty), 0);
+
+const shouldReservePendingStock = (status: RequestStatus): boolean =>
+  status === "For Verification" ||
+  status === "Awaiting Approval";
+
+const getRequestQtyByItem = (request: SupplyRequest): Map<string, number> => {
+  const totals = new Map<string, number>();
+  normalizeSupplyRequest(request).items.forEach((item) => {
+    totals.set(item.id, (totals.get(item.id) || 0) + item.qty);
+  });
+  return totals;
+};
+
+const getReservedQtyByItem = (requests: SupplyRequest[]): Map<string, number> => {
+  const totals = new Map<string, number>();
+  requests.map(normalizeSupplyRequest).forEach((request) => {
+    if (request.stockDeducted) return;
+    if (!shouldReservePendingStock(request.status)) return;
+    request.items.forEach((item) => {
+      totals.set(item.id, (totals.get(item.id) || 0) + item.qty);
+    });
+  });
+  return totals;
+};
+
+const applyPendingDelta = (
+  items: InventoryItem[],
+  request: SupplyRequest,
+  multiplier: 1 | -1,
+): InventoryItem[] =>
+  items.map((item) => {
+    const normalizedItem = normalizeInventoryItem(item);
+    const delta = normalizeSupplyRequest(request).items
+      .filter((requestItem) => requestItem.id === normalizedItem.id)
+      .reduce((sum, requestItem) => sum + requestItem.qty * multiplier, 0);
+
+    if (delta === 0) return normalizedItem;
+    return {
+      ...normalizedItem,
+      pendingQty: Math.max(normalizedItem.pendingQty + delta, 0),
+    };
+  });
 
 const INVENTORY_ITEM_ICON_RULES: {
   keywords: string[];
@@ -814,6 +910,11 @@ export const SupplyPage: React.FC = () => {
   };
 
   const handleAddItemToCart = (itemId: string) => {
+    const item = normalizedInventory.find((inventoryItem) => inventoryItem.id === itemId);
+    if (!item || getAvailableQty(item) <= 0) {
+      toast("warning", "No available stock for this item.");
+      return;
+    }
     const qtyToAdd = itemQuantities[itemId] || 1;
     const existing = requestCart.find((c) => c.itemId === itemId);
     if (existing) {
@@ -836,7 +937,7 @@ export const SupplyPage: React.FC = () => {
   };
 
   const openDetailModal = (req: SupplyRequest) => {
-    setSelectedRequest(JSON.parse(JSON.stringify(req)));
+    setSelectedRequest(normalizeSupplyRequest(JSON.parse(JSON.stringify(req))));
     setIsDetailModalOpen(true);
   };
 
@@ -853,8 +954,36 @@ export const SupplyPage: React.FC = () => {
 
   const saveRequestModification = () => {
     if (!selectedRequest) return;
-    setRequests(
-      requests.map((r) => (r.id === selectedRequest.id ? selectedRequest : r)),
+    const nextRequest = normalizeSupplyRequest(selectedRequest);
+    const previousRequest = normalizedRequests.find(
+      (request) => request.id === nextRequest.id,
+    );
+
+    if (
+      previousRequest &&
+      shouldReservePendingStock(previousRequest.status) &&
+      shouldReservePendingStock(nextRequest.status)
+    ) {
+      const previousReserved = getReservedQtyByItem([previousRequest]);
+      const nextReserved = getReservedQtyByItem([nextRequest]);
+      setInventory((prev) =>
+        prev.map((item) => {
+          const normalizedItem = normalizeInventoryItem(item);
+          const delta =
+            (nextReserved.get(normalizedItem.id) || 0) -
+            (previousReserved.get(normalizedItem.id) || 0);
+          return {
+            ...normalizedItem,
+            pendingQty: Math.max(normalizedItem.pendingQty + delta, 0),
+          };
+        }),
+      );
+    }
+
+    setRequests((prev) =>
+      prev.map((request) =>
+        request.id === nextRequest.id ? nextRequest : normalizeSupplyRequest(request),
+      ),
     );
     setIsDetailModalOpen(false);
     setSelectedRequest(null);
@@ -865,6 +994,62 @@ export const SupplyPage: React.FC = () => {
     STORAGE_KEYS.supplyRequests,
     DEFAULT_REQUESTS,
   );
+  const didReconcileSupplyRef = useRef(false);
+  const normalizedRequests = useMemo(
+    () => requests.map(normalizeSupplyRequest),
+    [requests],
+  );
+  const normalizedInventory = useMemo(
+    () => inventory.map(normalizeInventoryItem),
+    [inventory],
+  );
+
+  useEffect(() => {
+    if (didReconcileSupplyRef.current) return;
+    didReconcileSupplyRef.current = true;
+
+    const reconciledRequests = requests.map((request) => {
+      const normalizedRequest = normalizeSupplyRequest(request);
+      const hasStockDeductedFlag =
+        request && typeof request === "object" && "stockDeducted" in request;
+      if (
+        !hasStockDeductedFlag &&
+        (normalizedRequest.status === "Awaiting Approval" ||
+          normalizedRequest.status === "For Issuance")
+      ) {
+        return { ...normalizedRequest, stockDeducted: true };
+      }
+      return normalizedRequest;
+    });
+    const reservedQtyByItem = getReservedQtyByItem(reconciledRequests);
+
+    setInventory((prev) => {
+      let changed = false;
+      const next = prev.map((item) => {
+        const normalizedItem = normalizeInventoryItem(item);
+        const reconciledPendingQty = reservedQtyByItem.get(normalizedItem.id) || 0;
+        if (
+          normalizedItem.physicalQty !== item.physicalQty ||
+          normalizedItem.pendingQty !== item.pendingQty ||
+          normalizedItem.reorderPoint !== item.reorderPoint ||
+          normalizedItem.unit !== item.unit ||
+          normalizedItem.name !== item.name ||
+          reconciledPendingQty !== normalizedItem.pendingQty
+        ) {
+          changed = true;
+        }
+        return {
+          ...normalizedItem,
+          pendingQty: reconciledPendingQty,
+        };
+      });
+      return changed ? next : prev;
+    });
+
+    if (JSON.stringify(reconciledRequests) !== JSON.stringify(requests)) {
+      setRequests(reconciledRequests);
+    }
+  }, [requests, setInventory, setRequests]);
 
   const generateRequestId = () => {
     const fallbackConfig = {
@@ -927,16 +1112,24 @@ export const SupplyPage: React.FC = () => {
       return;
     }
 
-    const newReqItems = requestCart.map((cartItem) => {
-      const invItem = inventory.find((i) => i.id === cartItem.itemId)!;
+    const newReqItems = requestCart.flatMap((cartItem) => {
+      const invItem = normalizedInventory.find((i) => i.id === cartItem.itemId);
+      if (!invItem) return [];
+      const requestedQty = toSafeStockNumber(cartItem.qty);
+      if (requestedQty <= 0) return [];
       return {
         id: invItem.id,
         name: invItem.name,
-        qty: cartItem.qty,
-        requestedQty: cartItem.qty,
+        qty: requestedQty,
+        requestedQty,
         unit: invItem.unit,
       };
     });
+
+    if (newReqItems.length === 0) {
+      await alert("Please select valid stock items.");
+      return;
+    }
 
     const newReq: SupplyRequest = {
       id: generateRequestId(),
@@ -946,19 +1139,12 @@ export const SupplyPage: React.FC = () => {
       date: "Just now",
       requester: currentUser?.name || "Unknown",
       requesterId: currentUser?.id || "unknown",
+      stockDeducted: false,
     };
 
-    setInventory(
-      inventory.map((invItem) => {
-        const cartItem = requestCart.find((c) => c.itemId === invItem.id);
-        if (cartItem) {
-          return { ...invItem, pendingQty: invItem.pendingQty + cartItem.qty };
-        }
-        return invItem;
-      }),
-    );
+    setInventory((prev) => applyPendingDelta(prev, newReq, 1));
 
-    setRequests([newReq, ...requests]);
+    setRequests((prev) => [newReq, ...prev.map(normalizeSupplyRequest)]);
     setRequestCart([]);
     setRequestPurpose("");
     setIsRequestModalOpen(false);
@@ -969,29 +1155,37 @@ export const SupplyPage: React.FC = () => {
 
   const handleVerify = (reqId: string) => {
     // Use selectedRequest which has the supply officer's modified quantities
-    const request = selectedRequest || requests.find((r) => r.id === reqId);
-    if (!request) return;
+    const requestSource = selectedRequest || normalizedRequests.find((r) => r.id === reqId);
+    if (!requestSource) return;
+    const request = normalizeSupplyRequest(requestSource);
+    const previousRequest = normalizedRequests.find((r) => r.id === reqId);
+    const nextRequest: SupplyRequest = {
+      ...request,
+      status: "Awaiting Approval",
+      stockDeducted: request.stockDeducted,
+    };
 
-    setInventory((prev) =>
-      prev.map((invItem) => {
-        const reqItem = request.items.find((ri) => ri.id === invItem.id);
-        if (reqItem) {
+    if (previousRequest) {
+      const previousReserved = getReservedQtyByItem([previousRequest]);
+      const nextReserved = getReservedQtyByItem([nextRequest]);
+      setInventory((prev) =>
+        prev.map((item) => {
+          const normalizedItem = normalizeInventoryItem(item);
+          const delta =
+            (nextReserved.get(normalizedItem.id) || 0) -
+            (previousReserved.get(normalizedItem.id) || 0);
           return {
-            ...invItem,
-            physicalQty: invItem.physicalQty - reqItem.qty,
-            pendingQty: invItem.pendingQty - reqItem.requestedQty,
+            ...normalizedItem,
+            pendingQty: Math.max(normalizedItem.pendingQty + delta, 0),
           };
-        }
-        return invItem;
-      }),
-    );
+        }),
+      );
+    }
 
     // Save the modified request (preserving qty changes) AND update status
     setRequests((prev) =>
       prev.map((r) =>
-        r.id === reqId
-          ? { ...request, status: "Awaiting Approval" as RequestStatus }
-          : r,
+        r.id === reqId ? nextRequest : normalizeSupplyRequest(r),
       ),
     );
     setIsDetailModalOpen(false);
@@ -1000,32 +1194,56 @@ export const SupplyPage: React.FC = () => {
   };
 
   const handleApprove = (reqId: string) => {
+    const request = normalizedRequests.find((r) => r.id === reqId);
+    if (!request || request.status !== "Awaiting Approval") return;
+
+    const approvedQtyByItem = getRequestQtyByItem(request);
+    setInventory((prev) =>
+      prev.map((item) => {
+        const normalizedItem = normalizeInventoryItem(item);
+        const approvedQty = approvedQtyByItem.get(normalizedItem.id) || 0;
+        if (approvedQty === 0) return normalizedItem;
+        return {
+          ...normalizedItem,
+          physicalQty: request.stockDeducted
+            ? normalizedItem.physicalQty
+            : Math.max(normalizedItem.physicalQty - approvedQty, 0),
+          pendingQty: Math.max(normalizedItem.pendingQty - approvedQty, 0),
+        };
+      }),
+    );
+
     // Capture the approver's ID (current user)
     setRequests((prev) =>
       prev.map((r) =>
         r.id === reqId
           ? {
-              ...r,
+              ...normalizeSupplyRequest(r),
               status: "For Issuance",
               approverId: currentUser?.id,
+              stockDeducted: true,
             }
-          : r,
+          : normalizeSupplyRequest(r),
       ),
     );
     toast("success", `Request ${reqId} approved`);
   };
 
   const handleIssue = (reqId: string) => {
+    const request = normalizedRequests.find((r) => r.id === reqId);
+    if (!request || request.status !== "For Issuance") return;
+
     // Capture the issuer's ID (current user)
     setRequests((prev) =>
       prev.map((r) =>
         r.id === reqId
           ? {
-              ...r,
+              ...normalizeSupplyRequest(r),
               status: "To Receive",
               issuedById: currentUser?.id,
+              stockDeducted: true,
             }
-          : r,
+          : normalizeSupplyRequest(r),
       ),
     );
     toast("success", `Items issued for ${reqId}`);
@@ -1036,19 +1254,44 @@ export const SupplyPage: React.FC = () => {
       prev.map((r) =>
         r.id === reqId
           ? {
-              ...r,
+              ...normalizeSupplyRequest(r),
               status: "History",
               receivedById: currentUser?.id,
             }
-          : r,
+          : normalizeSupplyRequest(r),
       ),
     );
     toast("success", `Request ${reqId} marked as received`);
   };
 
   const handleReject = (reqId: string) => {
+    const request = normalizedRequests.find((r) => r.id === reqId);
+    if (request && (shouldReservePendingStock(request.status) || request.stockDeducted)) {
+      const rejectedQtyByItem = getRequestQtyByItem(request);
+      setInventory((prev) =>
+        prev.map((item) => {
+          const normalizedItem = normalizeInventoryItem(item);
+          const rejectedQty = rejectedQtyByItem.get(normalizedItem.id) || 0;
+          if (rejectedQty === 0) return normalizedItem;
+          return {
+            ...normalizedItem,
+            physicalQty: request.stockDeducted
+              ? normalizedItem.physicalQty + rejectedQty
+              : normalizedItem.physicalQty,
+            pendingQty: request.stockDeducted
+              ? normalizedItem.pendingQty
+              : Math.max(normalizedItem.pendingQty - rejectedQty, 0),
+          };
+        }),
+      );
+    }
+
     setRequests((prev) =>
-      prev.map((r) => (r.id === reqId ? { ...r, status: "Rejected" } : r)),
+      prev.map((r) =>
+        r.id === reqId
+          ? { ...normalizeSupplyRequest(r), status: "Rejected" }
+          : normalizeSupplyRequest(r),
+      ),
     );
     toast("warning", `Request ${reqId} rejected`);
   };
@@ -1259,10 +1502,10 @@ export const SupplyPage: React.FC = () => {
   );
 
   // --- Filtering ---
-  const filteredItems = inventory.filter((i) =>
+  const filteredItems = normalizedInventory.filter((i) =>
     i.name.toLowerCase().includes(itemSearch.toLowerCase()),
   );
-  const filteredInventory = inventory.filter((i) => {
+  const filteredInventory = normalizedInventory.filter((i) => {
     const matchSearch = i.name
       .toLowerCase()
       .includes(inventorySearch.toLowerCase());
@@ -1363,7 +1606,7 @@ export const SupplyPage: React.FC = () => {
     { id: "History", icon: CheckCircle2 },
   ];
 
-  const lowStockItems = inventory.filter(
+  const lowStockItems = normalizedInventory.filter(
     (item) => item.physicalQty <= item.reorderPoint,
   );
   const exportableLowStockItems =
@@ -1386,7 +1629,7 @@ export const SupplyPage: React.FC = () => {
       Unit: item.unit,
       "Physical Qty": item.physicalQty,
       "Pending Qty": item.pendingQty,
-      "Available Qty": item.physicalQty - item.pendingQty,
+      "Available Qty": getAvailableQty(item),
       "Re-order Point": item.reorderPoint,
       "Replenishment Gap": Math.max(item.reorderPoint - item.physicalQty, 0),
       Status: item.physicalQty <= 0 ? "Out of Stock" : "Low Stock",
@@ -1489,7 +1732,7 @@ export const SupplyPage: React.FC = () => {
           {itemsViewMode === "grid" ? (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 animate-in fade-in duration-300">
               {filteredItems.map((item) => {
-                const available = item.physicalQty - item.pendingQty;
+                const available = getAvailableQty(item);
                 const isLow = item.physicalQty <= item.reorderPoint;
                 const ItemIcon = getInventoryItemIcon(item.name);
                 return (
@@ -1613,7 +1856,7 @@ export const SupplyPage: React.FC = () => {
                   </thead>
                   <tbody className="divide-y divide-zinc-50 dark:divide-zinc-800/30">
                     {filteredItems.map((item) => {
-                      const available = item.physicalQty - item.pendingQty;
+                      const available = getAvailableQty(item);
                       const isLow = item.physicalQty <= item.reorderPoint;
                       const modifierValue = itemQuantities[item.id] || 1;
                       const ItemIcon = getInventoryItemIcon(item.name);
@@ -2314,7 +2557,7 @@ export const SupplyPage: React.FC = () => {
                   </thead>
                   <tbody className="divide-y divide-zinc-50 dark:divide-zinc-800/30">
                     {selectedRequest.items.map((reqItem) => {
-                      const inv = inventory.find(
+                      const inv = normalizedInventory.find(
                         (i) => i.id === reqItem.id,
                       ) || {
                         name: reqItem.name,
@@ -2374,7 +2617,7 @@ export const SupplyPage: React.FC = () => {
                             {inv.physicalQty}
                           </td>
                           <td className="py-3 text-[11px] font-black text-blue-600 text-center">
-                            {inv.physicalQty - inv.pendingQty}
+                            {getAvailableQty(inv)}
                           </td>
                           <td className="py-3 text-[11px] font-bold text-amber-500 text-center">
                             {inv.pendingQty}
@@ -2684,7 +2927,9 @@ export const SupplyPage: React.FC = () => {
             <div className="space-y-2 max-h-[240px] overflow-y-auto scrollbar-hide">
               {requestCart.length > 0 ? (
                 requestCart.map((cartItem) => {
-                  const item = inventory.find((i) => i.id === cartItem.itemId)!;
+                  const item = normalizedInventory.find((i) => i.id === cartItem.itemId);
+                  if (!item) return null;
+                  const cartQty = toSafeStockNumber(cartItem.qty) || 1;
                   return (
                     <div
                       key={item.id}
@@ -2705,7 +2950,7 @@ export const SupplyPage: React.FC = () => {
                               setRequestCart(
                                 requestCart.map((c) =>
                                   c.itemId === item.id
-                                    ? { ...c, qty: Math.max(1, c.qty - 1) }
+                                    ? { ...c, qty: Math.max(1, toSafeStockNumber(c.qty) - 1) }
                                     : c,
                                 ),
                               )
@@ -2715,14 +2960,14 @@ export const SupplyPage: React.FC = () => {
                             -
                           </button>
                           <span className="text-sm font-black w-8 text-center">
-                            {cartItem.qty}
+                            {cartQty}
                           </span>
                           <button
                             onClick={() =>
                               setRequestCart(
                                 requestCart.map((c) =>
                                   c.itemId === item.id
-                                    ? { ...c, qty: c.qty + 1 }
+                                    ? { ...c, qty: toSafeStockNumber(c.qty) + 1 }
                                     : c,
                                 ),
                               )
