@@ -139,10 +139,10 @@ export const LandingTeamSection: React.FC<LandingTeamSectionProps> = ({
     useState<TeamPanelLayout | null>(null);
 
   const localTeamSamples = [
-    "/team-sample-1.svg",
-    "/team-sample-2.svg",
-    "/team-sample-3.svg",
-    "/team-sample-4.svg",
+    "/PSA.webp",
+    "/PSA.webp",
+    "/PSA.webp",
+    "/PSA.webp",
   ];
 
   const clearHoverCloseTimeout = () => {

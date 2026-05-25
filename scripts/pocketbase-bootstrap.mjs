@@ -43,11 +43,9 @@ const collectionDefinitions = [
       { name: 'avatar', type: 'file', required: false, maxSelect: 1, maxSize: 15728640, mimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/svg+xml'] },
       { name: 'signature', type: 'file', required: false, maxSelect: 1, maxSize: 15728640, mimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/svg+xml'] },
       { name: 'mustResetPassword', type: 'bool', required: false },
-      { name: 'legacySupabaseId', type: 'text', required: false, max: 80 },
     ],
     indexes: [
       `CREATE INDEX idx_${authCollectionName}_name ON ${authCollectionName} (name)`,
-      `CREATE UNIQUE INDEX idx_${authCollectionName}_legacy_supabase_id ON ${authCollectionName} (legacySupabaseId) WHERE legacySupabaseId != ""`,
     ],
     passwordAuth: {
       enabled: true,

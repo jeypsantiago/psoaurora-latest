@@ -479,7 +479,7 @@ export const LandingPage: React.FC = () => {
       "perspective(1400px) rotateX(0deg) rotateY(0deg) scale(1)";
   };
   const heroBackgroundSource = resolveMediaSource(
-    config.hero.backgroundImage?.trim() || "/hero-aurora-office.jpg",
+    config.hero.backgroundImage?.trim() || "/PSA.webp",
   );
   const heroBackgroundPosition =
     config.hero.backgroundPosition || "center center";

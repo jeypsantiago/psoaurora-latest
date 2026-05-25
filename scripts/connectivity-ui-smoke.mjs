@@ -225,7 +225,7 @@ const run = async () => {
     progress('Connectivity tab loaded. Testing backend override controls...');
 
     const overrideInput = page.locator('xpath=//label[contains(normalize-space(.),"Backend URL Override")]/following-sibling::input[1]').first();
-    await overrideInput.fill('buzaznztcbfnfhjouulj.supabase.co');
+    await overrideInput.fill('https://pb.pso-aurora.com');
     await clickButton(page, 'Apply Backend URL');
     await delay(300);
     result.backendOverrideStored = await page.evaluate(() => window.localStorage.getItem('aurora_backend_url_override'));

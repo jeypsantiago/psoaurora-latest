@@ -99,6 +99,43 @@ const isLikelyBrokenImageSource = (value) => {
   return false;
 };
 
+const resolveImageCheckUrl = (source, { frontendUrl, backendUrl }) => {
+  const value = String(source || '').trim();
+  if (!value || value.startsWith('data:image/')) return '';
+  if (/^https?:\/\//i.test(value)) return value;
+  if (value.startsWith('/api/files/')) return resolveUrl(backendUrl, value);
+  if (value.startsWith('api/files/')) return resolveUrl(backendUrl, `/${value}`);
+  if (value.startsWith('/')) return resolveUrl(frontendUrl, value);
+  return '';
+};
+
+const checkImageReachability = async (source, urls) => {
+  const url = resolveImageCheckUrl(source, urls);
+  if (!url) return { ok: true, skipped: true, status: 0, url: '' };
+
+  const request = async (method) => fetchWithTimeout(url, {
+    method,
+    headers: {
+      Accept: 'image/*,*/*',
+      ...(method === 'GET' ? { Range: 'bytes=0-0' } : {}),
+    },
+    redirect: 'follow',
+  });
+
+  let response = await request('HEAD');
+  if (response.status === 405) {
+    response = await request('GET');
+  }
+
+  return {
+    ok: response.ok,
+    skipped: false,
+    status: response.status,
+    url,
+    contentType: response.headers.get('content-type') || '',
+  };
+};
+
 const main = async () => {
   console.log('Aurora Public Health Check');
   console.log(`- Frontend URL: ${frontendUrl}`);
@@ -155,8 +192,14 @@ const main = async () => {
         addResult('warn', 'Bundle Fetch', `Unable to read frontend bundle (HTTP ${bundleResponse.status}).`);
       } else {
         const bundle = await bundleResponse.text();
-        if (bundle.includes('localhost:8090') || bundle.includes('127.0.0.1:8090')) {
+        const configuredBackendOrigin = new URL(backendUrl).origin;
+        const hasLocalFallback = bundle.includes('localhost:8090') || bundle.includes('127.0.0.1:8090');
+        const hasConfiguredBackend = bundle.includes(configuredBackendOrigin);
+
+        if (hasLocalFallback && !hasConfiguredBackend) {
           addResult('fail', 'Backend URL in Bundle', 'Frontend bundle still contains localhost PocketBase URL.');
+        } else if (hasLocalFallback) {
+          addResult('pass', 'Backend URL in Bundle', 'Frontend bundle contains the configured backend URL; localhost is only present as fallback code.');
         } else {
           addResult('pass', 'Backend URL in Bundle', 'Frontend bundle appears to target a non-local PocketBase URL.');
         }
@@ -245,7 +288,20 @@ const main = async () => {
       } else if (!isPortableImageSource(heroImage)) {
         addResult('warn', 'Hero Image', `Hero image source format is uncommon: ${heroImage.slice(0, 90)}...`);
       } else {
-        addResult('pass', 'Hero Image', 'Hero image source looks portable.');
+        try {
+          const imageCheck = await checkImageReachability(heroImage, { frontendUrl, backendUrl });
+          if (!imageCheck.ok) {
+            addResult('fail', 'Hero Image', `Hero image is not reachable (HTTP ${imageCheck.status}).`, [
+              imageCheck.url,
+            ]);
+          } else {
+            addResult('pass', 'Hero Image', imageCheck.skipped
+              ? 'Hero image source looks portable.'
+              : `Hero image is reachable (${imageCheck.contentType || 'unknown content type'}).`);
+          }
+        } catch (error) {
+          addResult('fail', 'Hero Image', `Unable to fetch hero image (${error.message || 'network error'}).`);
+        }
       }
 
       if (teamImages.length === 0) {
@@ -255,7 +311,25 @@ const main = async () => {
         if (brokenTeamImage) {
           addResult('fail', 'Team Images', `At least one team image uses non-portable source: ${brokenTeamImage.slice(0, 90)}...`);
         } else {
-          addResult('pass', 'Team Images', `${teamImages.length} team image source(s) look portable.`);
+          const imageChecks = await Promise.allSettled(
+            teamImages.map((image) => checkImageReachability(image, { frontendUrl, backendUrl })),
+          );
+          const failedImageIndex = imageChecks.findIndex((result) => (
+            result.status === 'rejected' || !result.value.ok
+          ));
+
+          if (failedImageIndex >= 0) {
+            const failed = imageChecks[failedImageIndex];
+            const details = failed.status === 'fulfilled' && failed.value.url
+              ? [failed.value.url]
+              : [];
+            const statusMessage = failed.status === 'fulfilled'
+              ? `HTTP ${failed.value.status}`
+              : (failed.reason?.message || 'network error');
+            addResult('fail', 'Team Images', `Team image ${failedImageIndex + 1} is not reachable (${statusMessage}).`, details);
+          } else {
+            addResult('pass', 'Team Images', `${teamImages.length} team image source(s) are reachable.`);
+          }
         }
       }
     }

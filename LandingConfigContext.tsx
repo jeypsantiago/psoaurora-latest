@@ -65,7 +65,7 @@ const defaultConfig: LandingConfig = {
     subheadline:
       "Your one-stop hub for provincial data management, records tracking, supply monitoring, and employment services.",
     buttonText: "EXPLORE PROVINCIAL DATA",
-    backgroundImage: "/hero-aurora-office.jpg",
+    backgroundImage: "/PSA.webp",
     backgroundPosition: "center center",
   },
   highlights: {
@@ -126,7 +126,7 @@ const defaultConfig: LandingConfig = {
         designation: "Provincial Statistician",
         gender: "female",
         backgroundMode: "logo",
-        image: "/team-sample-1.svg",
+        image: "/PSA.webp",
         projects: [
           "CBMS 2026 Validation",
           "Municipal Data Harmonization",
@@ -142,7 +142,7 @@ const defaultConfig: LandingConfig = {
         designation: "Statistical Specialist II",
         gender: "male",
         backgroundMode: "color",
-        image: "/team-sample-2.svg",
+        image: "/PSA.webp",
         projects: [
           "Civil Registration Data Quality",
           "Records Digitization Program",
@@ -158,7 +158,7 @@ const defaultConfig: LandingConfig = {
         designation: "Information Systems Analyst",
         gender: "female",
         backgroundMode: "color",
-        image: "/team-sample-3.svg",
+        image: "/PSA.webp",
         projects: [
           "Portal Experience Improvements",
           "Service Monitoring Dashboard",

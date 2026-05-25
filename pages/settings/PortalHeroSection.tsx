@@ -109,7 +109,7 @@ export const PortalHeroSection: React.FC<PortalHeroSectionProps> = ({
               },
             });
           }}
-          placeholder="/hero-aurora-office.jpg"
+          placeholder="/PSA.webp"
         />
         <div className="md:col-span-2 -mt-1">
           {heroUsesBackendFilePath ? (
@@ -118,7 +118,7 @@ export const PortalHeroSection: React.FC<PortalHeroSectionProps> = ({
             </p>
           ) : (
             <p className="text-[10px] text-zinc-500 dark:text-zinc-400">
-              Use a local path like `/hero-aurora-office.jpg` or upload below
+              Use a local path like `/PSA.webp` or upload below
               (stored in backend as file path).
             </p>
           )}
@@ -189,12 +189,12 @@ export const PortalHeroSection: React.FC<PortalHeroSectionProps> = ({
                     ...landingConfigForm,
                     hero: {
                       ...landingConfigForm.hero,
-                      backgroundImage: "/hero-aurora-office.jpg",
+                      backgroundImage: "/PSA.webp",
                     },
                   });
                 }}
               >
-                Use `/hero-aurora-office.jpg`
+                Use `/PSA.webp`
               </Button>
               <Button
                 variant="ghost"

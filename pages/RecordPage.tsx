@@ -170,6 +170,51 @@ const formatRegistryColumnLabel = (
     .trim();
 };
 
+const getSafeRecordDetails = (
+  record: Pick<RegistryRecord, "details">,
+): Record<string, string> => {
+  const details = record.details;
+  return details && typeof details === "object" && !Array.isArray(details)
+    ? details
+    : {};
+};
+
+const getRecordLocationLabel = (record: RegistryRecord): string => {
+  const details = getSafeRecordDetails(record);
+  const prioritizeKeys = [
+    "Municipality",
+    "Place of Birth",
+    "Location/Venue",
+    "Location",
+    "Address",
+  ];
+
+  for (const key of prioritizeKeys) {
+    const directValue = details[key];
+    if (
+      typeof directValue === "string" &&
+      directValue.trim() &&
+      directValue !== "Not Specified"
+    ) {
+      return directValue.split(",")[0].trim();
+    }
+  }
+
+  for (const [key, value] of Object.entries(details)) {
+    if (
+      typeof value !== "string" ||
+      !value.trim() ||
+      value === "Not Specified"
+    )
+      continue;
+    if (/(municipality|location|place|venue|city|barangay|office)/i.test(key)) {
+      return value.split(",")[0].trim();
+    }
+  }
+
+  return "Unspecified";
+};
+
 export const RecordPage: React.FC = () => {
   const { confirm } = useDialog();
   const { toast } = useToast();
@@ -446,43 +491,6 @@ export const RecordPage: React.FC = () => {
 
   // Derived Data for Filters
   const nameColumnLabel = useMemo(() => formatRegistryColumnLabel("name"), []);
-
-  const getRecordLocationLabel = (record: RegistryRecord): string => {
-    const prioritizeKeys = [
-      "Municipality",
-      "Place of Birth",
-      "Location/Venue",
-      "Location",
-      "Address",
-    ];
-
-    for (const key of prioritizeKeys) {
-      const directValue = record.details[key];
-      if (
-        typeof directValue === "string" &&
-        directValue.trim() &&
-        directValue !== "Not Specified"
-      ) {
-        return directValue.split(",")[0].trim();
-      }
-    }
-
-    for (const [key, value] of Object.entries(record.details)) {
-      if (
-        typeof value !== "string" ||
-        !value.trim() ||
-        value === "Not Specified"
-      )
-        continue;
-      if (
-        /(municipality|location|place|venue|city|barangay|office)/i.test(key)
-      ) {
-        return value.split(",")[0].trim();
-      }
-    }
-
-    return "Unspecified";
-  };
 
   const filteredRecords = records.filter(
     (r) =>

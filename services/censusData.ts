@@ -956,7 +956,7 @@ const warnUnreadablePublicCensusKeys = (keys: string[]) => {
 
   warnedUnreadablePublicCensusKeys.add(warningId);
   console.warn(
-    "Public Census & Surveys state is not readable without login. Active cycles will stay device-local on the landing page until the Supabase public read policies allow these keys:",
+    "Public Census & Surveys state is not readable without login. Active cycles will stay device-local on the landing page until the PocketBase public app_state rules allow these keys:",
     normalizedKeys.join(", "),
   );
 };

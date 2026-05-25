@@ -12,21 +12,16 @@
     "start:prod": "node --env-file=.env scripts/production-server.mjs",
     "ops:runner": "node scripts/ops-runner.mjs",
     "pocketbase:bootstrap": "node scripts/pocketbase-bootstrap.mjs",
-    "migrate:to-pocketbase": "node scripts/migrate-supabase-to-pocketbase.mjs",
-    "migrate:pb-staff-users-to-users": "node scripts/migrate-pocketbase-staff-users-to-users.mjs",
-    "validate:pocketbase-migration": "node scripts/validate-pocketbase-migration.mjs",
     "health:public": "node scripts/health-check.mjs",
     "reports:reminders": "node scripts/send-report-reminders.mjs",
     "smoke:build": "node scripts/build-smoke.mjs",
     "smoke:connectivity": "node scripts/connectivity-ui-smoke.mjs",
     "smoke:landing-settings": "node scripts/landing-settings-smoke.mjs",
     "typecheck": "tsc -p tsconfig.app.json --noEmit",
-    "typecheck:app": "tsc -p tsconfig.app.json --noEmit",
-    "typecheck:functions": "node scripts/typecheck-functions.mjs"
+    "typecheck:app": "tsc -p tsconfig.app.json --noEmit"
   },
   "dependencies": {
     "@react-oauth/google": "^0.13.4",
-    "@supabase/supabase-js": "^2.98.0",
     "@types/qrcode": "^1.5.6",
     "axios": "^1.13.5",
     "docxtemplater": "^3.68.2",

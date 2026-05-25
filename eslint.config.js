@@ -9,14 +9,24 @@ export default tseslint.config(
     ignores: [
       "dist/**",
       "node_modules/**",
-      "supabase/**",
       "scripts/**",
+      "scratch/**",
       "quick-run/**",
       "public/**",
     ],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
+  {
+    files: ["*.cjs"],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: "script",
+      globals: {
+        ...globals.node,
+      },
+    },
+  },
   {
     files: ["**/*.{ts,tsx}"],
     languageOptions: {

@@ -93,7 +93,6 @@ const mapUserRecord = (row: AnyRecord | null): AnyRecord | null => {
     avatarPath: avatarFile,
     signaturePath: signatureFile,
     mustResetPassword: !!row.mustResetPassword,
-    legacySupabaseId: row.legacySupabaseId || '',
     isSuperAdmin: !!row.isSuperAdmin,
     _raw: row,
   };

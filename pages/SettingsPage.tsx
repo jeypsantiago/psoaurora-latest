@@ -993,10 +993,10 @@ export const SettingsPage: React.FC = () => {
   }, [opsRunnerUrl]);
 
   const teamSampleImages = [
-    "/team-sample-1.svg",
-    "/team-sample-2.svg",
-    "/team-sample-3.svg",
-    "/team-sample-4.svg",
+    "/PSA.webp",
+    "/PSA.webp",
+    "/PSA.webp",
+    "/PSA.webp",
   ];
   const teamVisualStyles: Array<"psa" | "amber" | "mint" | "ocean" | "rose"> = [
     "psa",
@@ -1350,9 +1350,9 @@ export const SettingsPage: React.FC = () => {
     if (status === 401)
       return "Session expired. Sign in again and retry upload.";
     if (status === 403)
-      return "Your account is authenticated but not allowed to upload into Supabase storage.";
+      return "Your account is authenticated but not allowed to upload into PocketBase landing_assets.";
     if (status === 404)
-      return "Landing asset storage is not ready. Open Connectivity & Ops and finish the Supabase migration/deploy setup.";
+      return "Landing asset storage is not ready. Open Connectivity & Ops and run the PocketBase bootstrap.";
     if (status === 413) return "Image is larger than backend file size limit.";
 
     return responseMessage || baseMessage || "backend upload failed";
@@ -1963,7 +1963,7 @@ export const SettingsPage: React.FC = () => {
                 const nextStatus: PublicLandingSyncStatus = {
                   state: "private_only",
                   message:
-                    "Landing record exists but is not publicly readable. Reapply the Supabase SQL policies so logged-out visitors can read it.",
+                    "Landing record exists but is not publicly readable. Reapply the PocketBase app_state public list/view rules so logged-out visitors can read it.",
                   checkedAt,
                   backendRecordId: authRecord.id || null,
                 };
@@ -1971,7 +1971,7 @@ export const SettingsPage: React.FC = () => {
                 if (options?.showToast) {
                   toast(
                     "error",
-                    "Landing record exists but is private-only. Reapply the Supabase public read policies.",
+                    "Landing record exists but is private-only. Reapply the PocketBase public app_state rules.",
                   );
                 }
                 return;
@@ -2194,7 +2194,7 @@ export const SettingsPage: React.FC = () => {
           if (options?.showToast) {
             toast(
               "error",
-              "Census & Surveys records are private-only. Reapply the Supabase public read policies.",
+              "Census & Surveys records are private-only. Reapply the PocketBase public app_state rules.",
             );
           }
           return;
@@ -2750,7 +2750,7 @@ export const SettingsPage: React.FC = () => {
     }
 
     const confirmed = await confirm(
-      "DANGER: This will wipe ALL saved web app data (local + Supabase app_state + user preference bundles). This cannot be undone.",
+      "DANGER: This will wipe ALL saved web app data (local + PocketBase app_state + user preference bundles). This cannot be undone.",
     );
     if (!confirmed) return;
 

@@ -1,8 +1,0 @@
-[functions.media-public]
-verify_jwt = false
-
-[functions.media-assets]
-verify_jwt = false
-
-[functions.staff-user-admin]
-verify_jwt = false
