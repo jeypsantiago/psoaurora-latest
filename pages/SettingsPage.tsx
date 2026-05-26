@@ -47,8 +47,10 @@ import {
   DEFAULT_REPORT_REMINDER_SETTINGS,
   normalizeReportReminderSettings,
 } from "../services/reportMonitoring";
-import { useGoogleAuth } from "../components/GoogleAuthProvider";
-import { useGoogleLogin } from "@react-oauth/google";
+import {
+  getDefaultGmailWhitelist,
+  normalizeGmailWhitelist,
+} from "../services/gmailWhitelist";
 import { useToast } from "../ToastContext";
 import { useLandingConfig, type LandingConfig } from "../LandingConfigContext";
 import { STORAGE_KEYS } from "../constants/storageKeys";
@@ -122,17 +124,88 @@ const GmailHubTab = lazy(loadGmailHubTab);
 const PortalConfigurationTab = lazy(loadPortalConfigurationTab);
 const ConnectivityTab = lazy(loadConnectivityTab);
 
-const SETTINGS_TAB_PREFETCHERS: Record<string, () => void> = {
-  record: () => void loadRecordSettingsTab(),
-  supply: () => void loadSupplySettingsTab(),
-  employment: () => void loadEmploymentSettingsTab(),
-  property: () => void loadPropertySettingsTab(),
-  reports: () => void loadReportMonitoringSettingsTab(),
-  users: () => void loadSecurityAccessTab(),
-  gmail: () => void loadGmailHubTab(),
-  portal: () => void loadPortalConfigurationTab(),
-  connectivity: () => void loadConnectivityTab(),
+const SETTINGS_TAB_PREFETCHERS: Record<string, () => Promise<unknown>> = {
+  record: loadRecordSettingsTab,
+  supply: loadSupplySettingsTab,
+  employment: loadEmploymentSettingsTab,
+  property: loadPropertySettingsTab,
+  reports: loadReportMonitoringSettingsTab,
+  users: loadSecurityAccessTab,
+  gmail: loadGmailHubTab,
+  portal: loadPortalConfigurationTab,
+  connectivity: loadConnectivityTab,
 };
+
+interface SettingsTabErrorBoundaryProps {
+  children: React.ReactNode;
+  label: string;
+}
+
+interface SettingsTabErrorBoundaryState {
+  error: Error | null;
+  resetKey: number;
+}
+
+const SettingsTabErrorBoundaryBase = React.Component as unknown as new (
+  props: SettingsTabErrorBoundaryProps,
+) => {
+  props: Readonly<SettingsTabErrorBoundaryProps>;
+  state: Readonly<SettingsTabErrorBoundaryState>;
+  setState: (
+    state:
+      | Partial<SettingsTabErrorBoundaryState>
+      | ((state: Readonly<SettingsTabErrorBoundaryState>) => Partial<SettingsTabErrorBoundaryState>),
+  ) => void;
+};
+
+class SettingsTabErrorBoundary extends SettingsTabErrorBoundaryBase {
+  state: SettingsTabErrorBoundaryState = {
+    error: null,
+    resetKey: 0,
+  };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidCatch(error: Error) {
+    console.warn(`${this.props.label} could not load.`, error);
+  }
+
+  retry = () => {
+    this.setState((state) => ({
+      error: null,
+      resetKey: state.resetKey + 1,
+    }));
+  };
+
+  render() {
+    if (this.state.error) {
+      return (
+        <Card
+          title={`${this.props.label} could not load`}
+          description="This settings panel hit a loading problem. The rest of Settings is still available."
+          action={
+            <Button variant="outline" onClick={this.retry}>
+              <RefreshCw size={14} className="mr-2" /> Retry
+            </Button>
+          }
+        >
+          <p className="text-xs font-medium leading-relaxed text-zinc-500 dark:text-zinc-400">
+            {this.state.error.message ||
+              "Reload this panel or refresh the page if the issue continues."}
+          </p>
+        </Card>
+      );
+    }
+
+    return (
+      <React.Fragment key={this.state.resetKey}>
+        {this.props.children}
+      </React.Fragment>
+    );
+  }
+}
 
 interface FormField {
   id: string;
@@ -457,7 +530,11 @@ export const SettingsPage: React.FC = () => {
     settingsPrefetchStartedRef.current = true;
 
     const prefetchAllTabs = () => {
-      Object.values(SETTINGS_TAB_PREFETCHERS).forEach((prefetch) => prefetch());
+      Object.entries(SETTINGS_TAB_PREFETCHERS).forEach(([tabId, prefetch]) => {
+        void prefetch().catch((error) => {
+          console.warn(`Unable to prefetch settings tab "${tabId}".`, error);
+        });
+      });
     };
 
     const browserWindow = window as Window & {
@@ -483,7 +560,9 @@ export const SettingsPage: React.FC = () => {
   }, []);
 
   const prefetchSettingsTab = useCallback((tabId: string) => {
-    SETTINGS_TAB_PREFETCHERS[tabId]?.();
+    void SETTINGS_TAB_PREFETCHERS[tabId]?.().catch((error) => {
+      console.warn(`Unable to prefetch settings tab "${tabId}".`, error);
+    });
   }, []);
   const [recordSubTab, setRecordSubTab] = useState("docs");
   const [supplySubTab, setSupplySubTab] = useState("ris");
@@ -643,20 +722,23 @@ export const SettingsPage: React.FC = () => {
   });
 
   // -- State for Gmail Settings --
-  const {
-    accessToken: _accessToken,
-    setAccessToken,
-    isAuthenticated,
-  } = useGoogleAuth();
   const [whitelist, setWhitelist] = useState<string[]>(() => {
-    return readStorageJson<string[]>(STORAGE_KEYS.gmailWhitelist, [
-      "supply.aurora@psa.gov.ph",
-      "admin.aurora@psa.gov.ph",
-    ]);
+    return normalizeGmailWhitelist(
+      readStorageJsonSafe<unknown>(
+        STORAGE_KEYS.gmailWhitelist,
+        getDefaultGmailWhitelist(),
+      ),
+    );
   });
 
   useEffect(() => {
-    writeStorageJson(STORAGE_KEYS.gmailWhitelist, whitelist);
+    const normalizedWhitelist = normalizeGmailWhitelist(whitelist, []);
+    if (normalizedWhitelist.length !== whitelist.length) {
+      setWhitelist(normalizedWhitelist);
+      return;
+    }
+
+    writeStorageJson(STORAGE_KEYS.gmailWhitelist, normalizedWhitelist);
   }, [whitelist]);
 
   useEffect(() => {
@@ -690,13 +772,6 @@ export const SettingsPage: React.FC = () => {
     writeStorageJson(STORAGE_KEYS.recordDocFields, docFields);
   }, [docFields]);
 
-  const login = useGoogleLogin({
-    onSuccess: (tokenResponse) => {
-      setAccessToken(tokenResponse.access_token);
-    },
-    scope: "https://www.googleapis.com/auth/gmail.readonly",
-  });
-
   const handleAddWhitelistEntry = useCallback(async () => {
     const newEmail = await prompt(
       "Add Approved Sender",
@@ -706,11 +781,12 @@ export const SettingsPage: React.FC = () => {
 
     if (
       newEmail &&
-      typeof newEmail === "string" &&
-      newEmail.includes("@") &&
-      !whitelist.includes(newEmail)
+      typeof newEmail === "string"
     ) {
-      setWhitelist([...whitelist, newEmail]);
+      const [normalizedEmail] = normalizeGmailWhitelist([newEmail], []);
+      if (normalizedEmail && !whitelist.includes(normalizedEmail)) {
+        setWhitelist([...whitelist, normalizedEmail]);
+      }
     }
   }, [prompt, whitelist]);
 
@@ -3674,18 +3750,17 @@ export const SettingsPage: React.FC = () => {
           )}
 
           {activeTab === "gmail" && (
-            <Suspense
-              fallback={<SettingsTabFallback label="Gmail integration controls" />}
-            >
-              <GmailHubTab
-                isAuthenticated={isAuthenticated}
-                onSignIn={login}
-                onDisconnect={() => setAccessToken(null)}
-                whitelist={whitelist}
-                onAddSender={handleAddWhitelistEntry}
-                onRemoveSender={handleRemoveWhitelistEntry}
-              />
-            </Suspense>
+            <SettingsTabErrorBoundary label="Gmail settings">
+              <Suspense
+                fallback={<SettingsTabFallback label="Gmail integration controls" />}
+              >
+                <GmailHubTab
+                  whitelist={whitelist}
+                  onAddSender={handleAddWhitelistEntry}
+                  onRemoveSender={handleRemoveWhitelistEntry}
+                />
+              </Suspense>
+            </SettingsTabErrorBoundary>
           )}
 
           {activeTab === "portal" && (

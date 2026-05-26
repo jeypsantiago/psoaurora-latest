@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Mail,
   Search,
@@ -19,9 +20,14 @@ import { useGoogleAuth } from "../components/GoogleAuthProvider";
 import { gmailService, EmailMessage } from "../services/gmail.service";
 import { useToast } from "../ToastContext";
 import { STORAGE_KEYS } from "../constants/storageKeys";
-import { readStorageJson, writeStorageJson } from "../services/storage";
+import { readStorageJson, readStorageJsonSafe, writeStorageJson } from "../services/storage";
+import {
+  getDefaultGmailWhitelist,
+  normalizeGmailWhitelist,
+} from "../services/gmailWhitelist";
 
 export const GmailHub: React.FC = () => {
+  const navigate = useNavigate();
   const { accessToken, isAuthenticated } = useGoogleAuth();
   const { toast } = useToast();
   const [emails, setEmails] = useState<EmailMessage[]>([]);
@@ -41,14 +47,16 @@ export const GmailHub: React.FC = () => {
 
   // Sender Whitelist - Only emails from these addresses will be shown
   const [whitelist, _setWhitelist] = useState<string[]>(() => {
-    return readStorageJson<string[]>(STORAGE_KEYS.gmailWhitelist, [
-      "supply.aurora@psa.gov.ph",
-      "admin.aurora@psa.gov.ph",
-    ]);
+    return normalizeGmailWhitelist(
+      readStorageJsonSafe<unknown>(
+        STORAGE_KEYS.gmailWhitelist,
+        getDefaultGmailWhitelist(),
+      ),
+    );
   });
 
   useEffect(() => {
-    writeStorageJson(STORAGE_KEYS.gmailWhitelist, whitelist);
+    writeStorageJson(STORAGE_KEYS.gmailWhitelist, normalizeGmailWhitelist(whitelist, []));
   }, [whitelist]);
 
   const handleSelectEmail = (email: EmailMessage) => {
@@ -141,7 +149,7 @@ export const GmailHub: React.FC = () => {
         </p>
         <Button
           variant="blue"
-          onClick={() => (window.location.hash = "#/settings?tab=gmail")}
+          onClick={() => navigate("/settings?tab=gmail")}
           className="px-10 h-14 rounded-2xl font-black uppercase tracking-widest shadow-xl shadow-blue-500/20"
         >
           Go to Settings
@@ -183,7 +191,7 @@ export const GmailHub: React.FC = () => {
           </Button>
           <Button
             variant="ghost"
-            onClick={() => (window.location.hash = "#/settings?tab=gmail")}
+            onClick={() => navigate("/settings?tab=gmail")}
             className="h-11 w-11 p-0 rounded-xl bg-zinc-100 dark:bg-zinc-900"
           >
             <Settings2 size={18} />

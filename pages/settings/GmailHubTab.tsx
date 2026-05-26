@@ -1,24 +1,49 @@
-import React from "react";
-import { LogOut, Mail, Plus, Trash2 } from "lucide-react";
+import React, { useCallback, useMemo } from "react";
+import { AlertTriangle, LogOut, Mail, Plus, Trash2 } from "lucide-react";
+import { useGoogleLogin } from "@react-oauth/google";
 import { Button, Card } from "../../components/ui";
+import { useGoogleAuth } from "../../components/GoogleAuthProvider";
+import { normalizeGmailWhitelist } from "../../services/gmailWhitelist";
 
 interface GmailHubTabProps {
-  isAuthenticated: boolean;
-  onSignIn: () => void;
-  onDisconnect: () => void;
   whitelist: string[];
   onAddSender: () => void;
   onRemoveSender: (email: string) => void;
 }
 
 export const GmailHubTab: React.FC<GmailHubTabProps> = ({
-  isAuthenticated,
-  onSignIn,
-  onDisconnect,
   whitelist,
   onAddSender,
   onRemoveSender,
 }) => {
+  const { setAccessToken, isAuthenticated } = useGoogleAuth();
+  const normalizedWhitelist = useMemo(
+    () => normalizeGmailWhitelist(whitelist, []),
+    [whitelist],
+  );
+  const oauthUnavailable = typeof window === "undefined";
+  const login = useGoogleLogin({
+    onSuccess: (tokenResponse) => {
+      setAccessToken(tokenResponse.access_token);
+    },
+    onError: (errorResponse) => {
+      console.warn("Gmail OAuth sign-in failed.", errorResponse);
+    },
+    scope: "https://www.googleapis.com/auth/gmail.readonly",
+  });
+  const signInButtonLabel = useMemo(
+    () => (oauthUnavailable ? "Google Sign-In Unavailable" : "Sign in with Google"),
+    [oauthUnavailable],
+  );
+  const handleSignIn = useCallback(() => {
+    if (oauthUnavailable) {
+      console.warn("Gmail OAuth is unavailable in this environment.");
+      return;
+    }
+
+    login();
+  }, [login, oauthUnavailable]);
+
   return (
     <div className="animate-in fade-in slide-in-from-bottom-2 duration-300 space-y-6">
       <Card
@@ -53,7 +78,7 @@ export const GmailHubTab: React.FC<GmailHubTabProps> = ({
                 <Button
                   variant="ghost"
                   className="bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 !px-6 h-12 rounded-2xl text-xs font-bold"
-                  onClick={onDisconnect}
+                  onClick={() => setAccessToken(null)}
                 >
                   <LogOut size={16} className="mr-2" /> Disconnect Account
                 </Button>
@@ -61,12 +86,22 @@ export const GmailHubTab: React.FC<GmailHubTabProps> = ({
                 <Button
                   variant="blue"
                   className="!px-8 h-12 rounded-2xl text-xs font-black uppercase tracking-widest shadow-xl shadow-blue-500/20"
-                  onClick={onSignIn}
+                  onClick={handleSignIn}
+                  disabled={oauthUnavailable}
                 >
-                  Sign in with Google
+                  {signInButtonLabel}
                 </Button>
               )}
             </div>
+            {oauthUnavailable && (
+              <div className="mt-4 flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200">
+                <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+                <p className="text-xs font-semibold leading-relaxed">
+                  Google sign-in is not available in this browser context. You
+                  can still manage approved senders below.
+                </p>
+              </div>
+            )}
           </div>
 
           <div className="space-y-4">
@@ -83,7 +118,7 @@ export const GmailHubTab: React.FC<GmailHubTabProps> = ({
               </Button>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {whitelist.map((email) => (
+              {normalizedWhitelist.map((email) => (
                 <div
                   key={email}
                   className="flex items-center justify-between p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800 group hover:border-blue-400 transition-all"

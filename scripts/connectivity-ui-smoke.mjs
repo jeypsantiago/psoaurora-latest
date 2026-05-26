@@ -210,18 +210,18 @@ const run = async () => {
 
   try {
     progress('Navigating to login page...');
-    await page.goto(`${BASE_ORIGIN}/#/login`, { waitUntil: 'domcontentloaded' });
+    await page.goto(`${BASE_ORIGIN}/login`, { waitUntil: 'domcontentloaded' });
     await page.fill('input#email', LOGIN_EMAIL);
     await page.fill('input#password', LOGIN_PASSWORD);
     await clickButton(page, '^Login$');
-    await page.waitForURL(/#\/dashboard/, { timeout: 25000 });
+    await page.waitForURL(/\/dashboard$/, { timeout: 25000 });
     result.checks.login = 'pass';
     progress('Login successful. Opening connectivity tab...');
 
-    await page.goto(`${BASE_ORIGIN}/#/settings?tab=connectivity`, { waitUntil: 'domcontentloaded' });
+    await page.goto(`${BASE_ORIGIN}/settings?tab=connectivity`, { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('text=Connectivity & Operations', { timeout: 25000 });
     result.connectivityUrl = page.url();
-    result.checks.connectivityRoute = page.url().includes('#/settings') ? 'pass' : 'fail';
+    result.checks.connectivityRoute = page.url().includes('/settings?tab=connectivity') ? 'pass' : 'fail';
     progress('Connectivity tab loaded. Testing backend override controls...');
 
     const overrideInput = page.locator('xpath=//label[contains(normalize-space(.),"Backend URL Override")]/following-sibling::input[1]').first();

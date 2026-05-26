@@ -169,20 +169,20 @@ const run = async () => {
 
     if (LOGIN_EMAIL && LOGIN_PASSWORD) {
       progress('Logging in for portal settings check...');
-      await page.goto(`${BASE_ORIGIN}/#/login`, { waitUntil: 'domcontentloaded' });
+      await page.goto(`${BASE_ORIGIN}/login`, { waitUntil: 'domcontentloaded' });
       await page.fill('input#email', LOGIN_EMAIL);
       await page.fill('input#password', LOGIN_PASSWORD);
       await clickButton(page, '^Login$');
-      await page.waitForURL(/#\/dashboard/, { timeout: 25000 });
+      await page.waitForURL(/\/dashboard$/, { timeout: 25000 });
 
-      await page.goto(`${BASE_ORIGIN}/#/settings?tab=portal`, { waitUntil: 'domcontentloaded' });
+      await page.goto(`${BASE_ORIGIN}/settings?tab=portal`, { waitUntil: 'domcontentloaded' });
       await page.waitForSelector('text=Portal Configuration (Landing Page)', { timeout: 25000 });
       await page.waitForSelector('text=Quick Setup Guide', { timeout: 25000 });
       result.checks.portalRoute = 'pass';
       result.checks.portalCard = 'pass';
     } else {
       progress('Checking unauthenticated portal redirect...');
-      await page.goto(`${BASE_ORIGIN}/#/settings?tab=portal`, { waitUntil: 'domcontentloaded' });
+      await page.goto(`${BASE_ORIGIN}/settings?tab=portal`, { waitUntil: 'domcontentloaded' });
       await delay(1500);
       const portalCardVisible =
         (await page.getByText('Portal Configuration (Landing Page)').count()) > 0;
@@ -192,7 +192,7 @@ const run = async () => {
       if (portalCardVisible) {
         throw new Error('Unauthenticated access unexpectedly reached the portal settings card.');
       }
-      if (!loadingVisible && !loginVisible && !page.url().includes('#/login')) {
+      if (!loadingVisible && !loginVisible && !page.url().includes('/login')) {
         throw new Error(`Expected protected route or login gate, got ${page.url()}`);
       }
       result.checks.portalRoute = 'pass';
