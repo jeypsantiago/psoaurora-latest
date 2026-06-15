@@ -116,7 +116,7 @@ export const createPocketBaseClient = () => {
 
 const quoted = (value) => `'${String(value).replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
 
-const findAppState = async (pb, key, fallback) => {
+export const findAppState = async (pb, key, fallback) => {
   try {
     const record = await pb.collection('app_state').getFirstListItem(`key = ${quoted(key)} && scope = 'global'`);
     return { record, value: record.value ?? fallback };
@@ -392,13 +392,20 @@ const sendEmailOverSocket = async (socket, { user, pass, from, fromName, to, sub
   await sendCommand(socket, `MAIL FROM:<${from}>`, 250);
   await sendCommand(socket, `RCPT TO:<${to}>`, [250, 251]);
   await sendCommand(socket, 'DATA', 354);
+  
   const boundary = `report-reminder-${crypto.randomUUID()}`;
-  const message = [
+  const replyTo = (process.env.SMTP_REPLY_TO || '').trim();
+  const headers = [
     `From: ${encodeAddress(fromName, from)}`,
+    replyTo ? `Reply-To: ${replyTo}` : '',
     `To: ${to}`,
     `Subject: ${encodeHeader(subject)}`,
     'MIME-Version: 1.0',
     `Content-Type: multipart/alternative; boundary="${boundary}"`,
+  ].filter(Boolean);
+
+  const message = [
+    ...headers,
     '',
     `--${boundary}`,
     'Content-Type: text/plain; charset=utf-8',
@@ -415,6 +422,7 @@ const sendEmailOverSocket = async (socket, { user, pass, from, fromName, to, sub
     `--${boundary}--`,
     '.',
   ].join('\r\n');
+  
   await sendCommand(socket, message, 250);
   await sendCommand(socket, 'QUIT', 221).catch(() => undefined);
   socket.end();
@@ -561,6 +569,7 @@ export const runReportReminders = async ({
     }
 
     const values = {
+      reportId: String(report.id),
       projectName: project.name || 'Unnamed project',
       reportTitle: report.title || 'Untitled report',
       period: report.period || '',
@@ -577,7 +586,10 @@ export const runReportReminders = async ({
       psaLogo: buildPsaLogoHtml(),
     };
 
-    const subject = fillTemplate(settings.subjectTemplate, values);
+    let subject = fillTemplate(settings.subjectTemplate, values);
+    if (!subject.includes(`[Ref: ${report.id}]`)) {
+      subject = `${subject} [Ref: ${report.id}]`;
+    }
     const htmlBody = fillTemplate(upgradeReminderTemplate(settings.bodyTemplate), values);
     const textBody = stripHtmlToText(htmlBody) || [
       'PHILIPPINE STATISTICS AUTHORITY',
@@ -618,4 +630,432 @@ export const runReportReminders = async ({
   }
 
   return { sent, failed, skipped, disabled: false };
+};
+
+// --- Inbound Email Reply Processing Support ---
+
+export const isReportHistoryRecord = (report) => Boolean(report.submittedDate || report.archived);
+
+const addReportFrequencyToDate = (value, frequency) => {
+  const source = normalizeDate(value) || new Date();
+  const monthsToAdd = frequency === 'monthly' ? 1 : frequency === 'quarterly' ? 3 : 12;
+  const targetMonthIndex = source.getMonth() + monthsToAdd;
+  const targetYear = source.getFullYear() + Math.floor(targetMonthIndex / 12);
+  const normalizedMonth = ((targetMonthIndex % 12) + 12) % 12;
+  
+  // Calculate days in target month
+  const targetDaysInMonth = new Date(targetYear, normalizedMonth + 1, 0).getDate();
+  const targetDay = Math.min(source.getDate(), targetDaysInMonth);
+  return toDateOnly(new Date(targetYear, normalizedMonth, targetDay));
+};
+
+const getGeneratedPeriodLabel = (deadline, frequency) => {
+  const date = normalizeDate(deadline) || new Date();
+  const year = date.getFullYear();
+  if (frequency === 'monthly') {
+    return date.toLocaleDateString('en-PH', { month: 'long', year: 'numeric' });
+  }
+  if (frequency === 'quarterly') {
+    return `Q${Math.floor(date.getMonth() / 3) + 1} ${year}`;
+  }
+  return String(year);
+};
+
+export const createNextReportInstance = (report, existingReports) => {
+  const seriesId = report.seriesId || report.id;
+  const hasCurrentNext = existingReports.some(
+    (entry) =>
+      entry.id !== report.id &&
+      (entry.seriesId || entry.id) === seriesId &&
+      !isReportHistoryRecord(entry),
+  );
+  if (hasCurrentNext) return null;
+
+  const nextDeadline = addReportFrequencyToDate(report.deadline, report.frequency);
+  const now = new Date().toISOString();
+  return {
+    ...report,
+    id: crypto.randomUUID(),
+    seriesId,
+    period: getGeneratedPeriodLabel(nextDeadline, report.frequency),
+    deadline: nextDeadline,
+    submittedDate: undefined,
+    periodStart: report.periodStart
+      ? addReportFrequencyToDate(report.periodStart, report.frequency)
+      : undefined,
+    periodEnd: report.periodEnd
+      ? addReportFrequencyToDate(report.periodEnd, report.frequency)
+      : undefined,
+    sequence: (Number(report.sequence) || 1) + 1,
+    archived: false,
+    generatedFromReportId: report.id,
+    createdAt: now,
+    updatedAt: now,
+  };
+};
+
+export const extractTextFromMime = (raw) => {
+  if (!raw) return '';
+
+  const getBodyOffset = (str) => {
+    const idxCrLf = str.indexOf('\r\n\r\n');
+    if (idxCrLf !== -1) return idxCrLf + 4;
+    const idxLf = str.indexOf('\n\n');
+    if (idxLf !== -1) return idxLf + 2;
+    return -1;
+  };
+
+  // 1. If not multipart, decode body content directly
+  const boundaryMatch = raw.match(/boundary="([^"]+)"/i) || raw.match(/boundary=([^\s;]+)/i);
+  if (!boundaryMatch) {
+    const offset = getBodyOffset(raw);
+    const headersSection = offset !== -1 ? raw.slice(0, offset) : '';
+    const isHeaderSection = headersSection && /^[a-zA-Z0-9-]+:/m.test(headersSection);
+
+    let body = (offset !== -1 && isHeaderSection) ? raw.slice(offset) : raw;
+    const cteMatch = isHeaderSection ? headersSection.match(/Content-Transfer-Encoding:\s*([^\r\n]+)/i) : null;
+    const cte = cteMatch ? cteMatch[1].trim().toLowerCase() : '';
+    body = decodeBodyContent(body, cte);
+    return body.trim();
+  }
+
+  const boundary = boundaryMatch[1];
+  const parts = raw.split(`--${boundary}`);
+
+  // 2. Look for text/plain part
+  for (const part of parts) {
+    if (part.includes('Content-Type: text/plain')) {
+      const offset = getBodyOffset(part);
+      if (offset !== -1) {
+        let body = part.slice(offset);
+        
+        // Remove trailing boundary dashes if present
+        if (body.endsWith('--')) {
+          body = body.slice(0, -2);
+        }
+        
+        const headersSection = part.slice(0, offset);
+        const cteMatch = headersSection.match(/Content-Transfer-Encoding:\s*([^\r\n]+)/i);
+        const cte = cteMatch ? cteMatch[1].trim().toLowerCase() : '';
+        body = decodeBodyContent(body, cte);
+        return body.trim();
+      }
+    }
+  }
+
+  // 3. Fallback: parse text/html and strip HTML tags
+  for (const part of parts) {
+    if (part.includes('Content-Type: text/html')) {
+      const offset = getBodyOffset(part);
+      if (offset !== -1) {
+        let body = part.slice(offset);
+        if (body.endsWith('--')) {
+          body = body.slice(0, -2);
+        }
+        const headersSection = part.slice(0, offset);
+        const cteMatch = headersSection.match(/Content-Transfer-Encoding:\s*([^\r\n]+)/i);
+        const cte = cteMatch ? cteMatch[1].trim().toLowerCase() : '';
+        body = decodeBodyContent(body, cte);
+        return body.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      }
+    }
+  }
+
+  return '';
+};
+
+const decodeBodyContent = (body, encoding) => {
+  let cleaned = body.trim();
+  if (encoding === 'base64') {
+    try {
+      cleaned = cleaned.replace(/\s+/g, '');
+      return Buffer.from(cleaned, 'base64').toString('utf8');
+    } catch (e) {
+      console.warn('[report-reminders] Failed base64 decoding:', e.message);
+      return body;
+    }
+  }
+  if (encoding === 'quoted-printable') {
+    try {
+      return cleaned
+        .replace(/=([\dA-F]{2})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+        .replace(/=\r?\n/g, '');
+    } catch (e) {
+      console.warn('[report-reminders] Failed quoted-printable decoding:', e.message);
+      return body;
+    }
+  }
+  return body;
+};
+
+export const cleanEmailBody = (textBody) => {
+  if (!textBody) return '';
+  const lines = textBody.split(/\r?\n/);
+  const cleanedLines = [];
+  for (const line of lines) {
+    const cleanLine = line.trim();
+    if (
+      cleanLine.startsWith('>') ||
+      /^on\s+.*,\s+.*,\s+.*wrote:$/i.test(cleanLine) ||
+      cleanLine.toLowerCase().startsWith('-----original message-----') ||
+      cleanLine.toLowerCase().startsWith('from:') ||
+      cleanLine.toLowerCase().startsWith('sent:') ||
+      cleanLine.toLowerCase().startsWith('subject:') ||
+      cleanLine.toLowerCase().startsWith('to:')
+    ) {
+      break;
+    }
+    cleanedLines.push(line);
+  }
+  return cleanedLines.join('\n').trim();
+};
+
+export const parseEmailReply = (bodyText, replyDate) => {
+  const cleanBody = bodyText
+    .toLowerCase()
+    .replace(/>+/g, '')
+    .trim();
+
+  const keywords = ['submitted', 'completed', 'done', 'uploaded', 'sent', 'finished', 'approved'];
+  const hasKeyword = keywords.some(kw => cleanBody.includes(kw));
+  if (!hasKeyword) {
+    return { ok: false, reason: 'No submission keywords (submitted, completed, done, etc.) found in the response.' };
+  }
+
+  // 1. Look for YYYY-MM-DD
+  const yyyymmdd = cleanBody.match(/\b(\d{4})[-/](\d{1,2})[-/](\d{1,2})\b/);
+  if (yyyymmdd) {
+    const year = parseInt(yyyymmdd[1], 10);
+    const month = String(yyyymmdd[2]).padStart(2, '0');
+    const day = String(yyyymmdd[3]).padStart(2, '0');
+    return { ok: true, date: `${year}-${month}-${day}` };
+  }
+
+  // 2. Look for MM/DD/YYYY
+  const mmddyyyy = cleanBody.match(/\b(\d{1,2})[-/](\d{1,2})[-/](\d{4})\b/);
+  if (mmddyyyy) {
+    const year = parseInt(mmddyyyy[3], 10);
+    const month = String(mmddyyyy[1]).padStart(2, '0');
+    const day = String(mmddyyyy[2]).padStart(2, '0');
+    return { ok: true, date: `${year}-${month}-${day}` };
+  }
+
+  // 3. Look for relative terms
+  const emailDate = replyDate ? new Date(replyDate) : new Date();
+  if (Number.isNaN(emailDate.getTime())) {
+    return { ok: true, date: new Date().toISOString().slice(0, 10) };
+  }
+
+  if (cleanBody.includes('yesterday')) {
+    const d = new Date(emailDate);
+    d.setDate(d.getDate() - 1);
+    return { ok: true, date: d.toISOString().slice(0, 10) };
+  }
+
+  if (cleanBody.includes('today')) {
+    return { ok: true, date: emailDate.toISOString().slice(0, 10) };
+  }
+
+  return { ok: true, date: emailDate.toISOString().slice(0, 10) };
+};
+
+export const processInboundReply = async (reportId, senderEmail, rawMime, replyDate, pb = createPocketBaseClient()) => {
+  await authenticateSuperuserClient(pb);
+
+  const [{ record: submissionsRecord, value: submissions }, { value: projects }] = await Promise.all([
+    findAppState(pb, REPORT_REMINDER_KEYS.submissions, []),
+    findAppState(pb, REPORT_REMINDER_KEYS.projects, []),
+  ]);
+
+  const reportList = Array.isArray(submissions) ? submissions : [];
+  const projectList = Array.isArray(projects) ? projects : [];
+
+  const reportIndex = reportList.findIndex(r => String(r.id) === String(reportId));
+  if (reportIndex === -1) {
+    throw new Error(`Report submission with ID "${reportId}" not found.`);
+  }
+  const report = reportList[reportIndex];
+
+  const project = projectList.find(p => String(p.id) === String(report.projectId));
+  if (!project) {
+    throw new Error(`Project with ID "${report.projectId}" not found for this report.`);
+  }
+
+  const focalUser = await pb.collection('users').getOne(project.focalUserId);
+  if (!focalUser || !focalUser.email) {
+    throw new Error('Focal person user record or email not found.');
+  }
+
+  const cleanSender = String(senderEmail).trim().toLowerCase();
+  const cleanFocalEmail = String(focalUser.email).trim().toLowerCase();
+  if (cleanSender !== cleanFocalEmail) {
+    throw new Error(`Unauthorized sender: "${senderEmail}". Expected focal person: "${focalUser.email}".`);
+  }
+
+  const parsedText = extractTextFromMime(rawMime);
+  const cleanBodyText = cleanEmailBody(parsedText);
+
+  const parseResult = parseEmailReply(cleanBodyText, replyDate);
+  if (!parseResult.ok) {
+    throw new Error(`Parse failed: ${parseResult.reason}`);
+  }
+
+  const now = new Date().toISOString();
+  const updatedReport = {
+    ...report,
+    submittedDate: parseResult.date,
+    archived: true,
+    updatedAt: now,
+  };
+
+  const nextSubmissions = reportList.map((r, idx) => idx === reportIndex ? updatedReport : r);
+
+  const generated = createNextReportInstance(updatedReport, nextSubmissions);
+  if (generated) {
+    nextSubmissions.unshift(generated);
+  }
+
+  if (submissionsRecord && submissionsRecord.id) {
+    await pb.collection('app_state').update(submissionsRecord.id, { value: nextSubmissions });
+  } else {
+    await pb.collection('app_state').create({
+      key: REPORT_REMINDER_KEYS.submissions,
+      scope: 'global',
+      ownerId: '',
+      value: nextSubmissions
+    });
+  }
+
+  const logRecord = await findAppState(pb, REPORT_REMINDER_KEYS.log, []);
+  const logs = Array.isArray(logRecord.value) ? logRecord.value : [];
+  logs.push({
+    id: crypto.randomUUID(),
+    reportId: report.id,
+    projectId: project.id,
+    focalUserId: project.focalUserId,
+    focalEmail: cleanFocalEmail,
+    sentAt: now,
+    status: 'sent',
+    reminderStage: 'manual-test',
+    reminderDate: parseResult.date,
+    errorMessage: `Submission automatically recorded via email reply from ${senderEmail}. Text: "${cleanBodyText.slice(0, 100)}"`
+  });
+  await upsertAppState(pb, REPORT_REMINDER_KEYS.log, logs);
+
+  // Send confirmation email asynchronously
+  void sendSubmissionConfirmationEmail({
+    focalEmail: cleanFocalEmail,
+    focalName: focalUser.name || focalUser.email,
+    projectName: project.name || 'Unnamed project',
+    reportTitle: report.title || 'Untitled report',
+    period: report.period || '',
+    deadline: report.deadline || '',
+    submittedDate: parseResult.date,
+    recordedVia: 'Email Reply Parser',
+  }).catch((err) => {
+    console.error('[report-reminders] Error in sendSubmissionConfirmationEmail:', err.message);
+  });
+
+  return {
+    ok: true,
+    reportId: report.id,
+    title: report.title,
+    period: report.period,
+    submittedDate: parseResult.date,
+    generatedNextPeriod: generated ? generated.period : null
+  };
+};
+
+export const sendSubmissionConfirmationEmail = async ({
+  focalEmail,
+  focalName,
+  projectName,
+  reportTitle,
+  period,
+  deadline,
+  submittedDate,
+  recordedVia,
+}) => {
+  const subject = `[Confirmed] Submission Recorded: ${reportTitle} - ${period}`;
+  
+  const htmlBody = `
+<div style="font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e4e4e7; border-radius: 12px; overflow: hidden; background-color: #ffffff; color: #18181b;">
+  <div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); padding: 32px 24px; text-align: center; color: #ffffff;">
+    <h1 style="margin: 0; font-size: 24px; font-weight: 800; letter-spacing: -0.025em;">Submission Confirmed</h1>
+    <p style="margin: 8px 0 0 0; font-size: 14px; opacity: 0.9; font-weight: 500;">Report Submission Recorded</p>
+  </div>
+  <div style="padding: 24px;">
+    <p style="margin: 0 0 16px 0; font-size: 15px; line-height: 1.6;">Hello <strong>${focalName || focalEmail}</strong>,</p>
+    <p style="margin: 0 0 24px 0; font-size: 15px; line-height: 1.6; color: #3f3f46;">
+      This email confirms that the submission date for the following report has been successfully recorded in the PSO Aurora Report Monitoring System.
+    </p>
+    
+    <div style="background-color: #f4f4f5; border-radius: 8px; padding: 16px; margin-bottom: 24px;">
+      <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+        <tr>
+          <td style="padding: 4px 0; color: #71717a; width: 120px; font-weight: 600;">Project:</td>
+          <td style="padding: 4px 0; color: #18181b; font-weight: 700;">${projectName}</td>
+        </tr>
+        <tr>
+          <td style="padding: 4px 0; color: #71717a; font-weight: 600;">Report Title:</td>
+          <td style="padding: 4px 0; color: #18181b; font-weight: 700;">${reportTitle}</td>
+        </tr>
+        <tr>
+          <td style="padding: 4px 0; color: #71717a; font-weight: 600;">Report Period:</td>
+          <td style="padding: 4px 0; color: #18181b;">${period}</td>
+        </tr>
+        <tr>
+          <td style="padding: 4px 0; color: #71717a; font-weight: 600;">Deadline:</td>
+          <td style="padding: 4px 0; color: #18181b;">${deadline}</td>
+        </tr>
+        <tr>
+          <td style="padding: 4px 0; color: #71717a; font-weight: 600;">Submitted Date:</td>
+          <td style="padding: 4px 0; color: #10b981; font-weight: 700;">${submittedDate}</td>
+        </tr>
+        <tr>
+          <td style="padding: 4px 0; color: #71717a; font-weight: 600;">Recorded Via:</td>
+          <td style="padding: 4px 0; color: #18181b; font-weight: 600;">${recordedVia}</td>
+        </tr>
+      </table>
+    </div>
+    
+    <p style="margin: 0; font-size: 13px; line-height: 1.5; color: #71717a; text-align: center;">
+      Thank you for keeping your reporting requirements up to date.
+    </p>
+  </div>
+  <div style="padding: 18px 24px; background-color: #111827; color: #d1d5db; font-size: 12px; line-height: 1.5; text-align: center;">
+    This is an automated confirmation from the PSO Aurora Report Monitoring System.<br />
+    Philippine Statistics Authority - Aurora Provincial Statistical Office
+  </div>
+</div>
+`;
+
+  const textBody = `
+Submission Confirmed
+Report Submission Recorded
+
+Hello ${focalName || focalEmail},
+
+This email confirms that the submission date for the following report has been successfully recorded in the PSO Aurora Report Monitoring System:
+
+Project: ${projectName}
+Report Title: ${reportTitle}
+Report Period: ${period}
+Deadline: ${deadline}
+Submitted Date: ${submittedDate}
+Recorded Via: ${recordedVia}
+
+Thank you for keeping your reporting requirements up to date.
+---
+Philippine Statistics Authority - Aurora Provincial Statistical Office
+`;
+
+  try {
+    await sendReportReminderEmail({ to: focalEmail, subject, htmlBody, textBody });
+    console.log(`[report-reminders] Confirmation email sent to ${focalEmail} via ${recordedVia}.`);
+    return true;
+  } catch (error) {
+    console.error(`[report-reminders] Failed to send confirmation email to ${focalEmail}:`, error.message);
+    return false;
+  }
 };

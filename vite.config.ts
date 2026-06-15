@@ -2,7 +2,7 @@ import path from 'path';
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import { handleRegisterRequest } from './scripts/registration-api.mjs';
-import { handleReportReminderTestRequest } from './scripts/report-reminder-api.mjs';
+import { handleReportReminderTestRequest, handleInboundEmailRequest, handleConfirmSubmissionRequest } from './scripts/report-reminder-api.mjs';
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', '');
@@ -32,6 +32,20 @@ export default defineConfig(({ mode }) => {
               return;
             }
             await handleReportReminderTestRequest(req, res);
+          });
+          server.middlewares.use('/api/emails/inbound', async (req, res, next) => {
+            if (req.method !== 'POST') {
+              next();
+              return;
+            }
+            await handleInboundEmailRequest(req, res);
+          });
+          server.middlewares.use('/api/report-reminders/confirm-submission', async (req, res, next) => {
+            if (req.method !== 'POST') {
+              next();
+              return;
+            }
+            await handleConfirmSubmissionRequest(req, res);
           });
         },
       },

@@ -5,8 +5,9 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import PocketBase from 'pocketbase';
-import { getPocketBaseUrl, runReportReminders } from './report-reminder-core.mjs';
+import { getPocketBaseUrl, runReportReminders, processInboundReply } from './report-reminder-core.mjs';
 import { handleRegisterRequest } from './registration-api.mjs';
+import { handleConfirmSubmissionRequest } from './report-reminder-api.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -177,6 +178,50 @@ const handleTestReminder = async (req, res) => {
   }
 };
 
+const handleInboundEmail = async (req, res) => {
+  const urlObj = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  const token = urlObj.searchParams.get('token') || '';
+  const expectedToken = (process.env.AURORA_INBOUND_EMAIL_TOKEN || '').trim();
+
+  if (!expectedToken || token !== expectedToken) {
+    sendJson(res, 401, { ok: false, message: 'Unauthorized webhook token.' });
+    return;
+  }
+
+  let body;
+  try {
+    body = await readJsonBody(req);
+  } catch {
+    sendJson(res, 400, { ok: false, message: 'Invalid JSON payload.' });
+    return;
+  }
+
+  const rawMime = typeof body.raw === 'string' ? body.raw : '';
+  const senderEmail = body.from && typeof body.from === 'object' ? String(body.from.address || '') : String(body.from || '');
+  const subject = typeof body.subject === 'string' ? body.subject : '';
+  const replyDate = typeof body.date === 'string' ? body.date : '';
+
+  if (!rawMime || !senderEmail || !subject) {
+    sendJson(res, 400, { ok: false, message: 'Missing required payload fields (raw, from, subject).' });
+    return;
+  }
+
+  const match = subject.match(/\[Ref:\s*([a-zA-Z0-9-]+)\]/);
+  if (!match) {
+    sendJson(res, 400, { ok: false, message: 'No report reference token [Ref: ...] found in subject.' });
+    return;
+  }
+  const reportId = match[1].trim();
+
+  try {
+    const result = await processInboundReply(reportId, senderEmail, rawMime, replyDate);
+    sendJson(res, 200, { ok: true, message: 'Reply processed and status updated.', result });
+  } catch (error) {
+    console.error(`[report-reminders] Webhook reply error:`, error.message);
+    sendJson(res, 500, { ok: false, message: error.message || 'Error processing email reply.' });
+  }
+};
+
 const serveStatic = async (req, res) => {
   const rawPath = decodeURIComponent(new URL(req.url || '/', 'http://localhost').pathname);
   const requestedPath = rawPath === '/' ? '/index.html' : rawPath;
@@ -225,6 +270,16 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'POST' && req.url === '/api/report-reminders/test') {
     await handleTestReminder(req, res);
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/api/report-reminders/confirm-submission') {
+    await handleConfirmSubmissionRequest(req, res);
+    return;
+  }
+
+  if (req.method === 'POST' && req.url.startsWith('/api/emails/inbound')) {
+    await handleInboundEmail(req, res);
     return;
   }
 

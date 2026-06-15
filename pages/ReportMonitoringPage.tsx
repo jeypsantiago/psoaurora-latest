@@ -8,6 +8,7 @@ import {
   ChevronDown,
   CheckCircle2,
   ClipboardCheck,
+  Copy,
   Download,
   Edit3,
   FileSpreadsheet,
@@ -813,6 +814,7 @@ export const ReportMonitoringPage: React.FC = () => {
       createdAt: existingReport?.createdAt || now,
       updatedAt: now,
     };
+    const isNewSubmission = nextReport.submittedDate && (!existingReport || !existingReport.submittedDate);
     setReports((prev) => {
       const savedReports = prev.some((report) => report.id === nextReport.id)
         ? prev.map((report) => (report.id === nextReport.id ? nextReport : report))
@@ -826,9 +828,27 @@ export const ReportMonitoringPage: React.FC = () => {
     toast(
       "success",
       nextReport.submittedDate
-        ? "Report saved and next period checked."
+        ? "Report marked as submitted successfully!"
         : "Report schedule saved.",
     );
+    if (isNewSubmission) {
+      void getAuthToken()
+        .then((token) => {
+          void fetch("/api/report-reminders/confirm-submission", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              reportId: nextReport.id,
+              submittedDate: nextReport.submittedDate,
+              recordedVia: "Web Application (Manual Update)",
+            }),
+          }).catch((err) => console.error("Failed to trigger confirmation email:", err));
+        })
+        .catch((err) => console.error("Failed to get auth token:", err));
+    }
   };
 
   const deleteProject = async (project: ReportProject) => {
@@ -934,6 +954,7 @@ export const ReportMonitoringPage: React.FC = () => {
       );
       if (!ok) return;
     }
+    const isNewSubmission = normalizedDate && !submittedDateReport.submittedDate;
     setReports((prev) => {
       const updatedReport: ReportSubmission = {
         ...submittedDateReport,
@@ -963,8 +984,27 @@ export const ReportMonitoringPage: React.FC = () => {
     setSubmittedDateValue("");
     toast(
       "success",
-      normalizedDate ? "Submitted date updated." : "Submitted date cleared.",
+      normalizedDate ? "Report marked as submitted successfully!" : "Submitted date cleared.",
     );
+    if (isNewSubmission) {
+      try {
+        const token = await getAuthToken();
+        void fetch("/api/report-reminders/confirm-submission", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            reportId: submittedDateReport.id,
+            submittedDate: normalizedDate,
+            recordedVia: "Web Application (Manual Update)",
+          }),
+        }).catch((err) => console.error("Failed to trigger confirmation email:", err));
+      } catch (err) {
+        console.error("Failed to get auth token:", err);
+      }
+    }
   };
 
   const exportCsv = () => {
@@ -1950,8 +1990,24 @@ export const ReportMonitoringPage: React.FC = () => {
             <span className="block text-lg font-extrabold text-zinc-900 dark:text-white">
               {projectModalTitle}
             </span>
-            <span className="mt-1 block text-xs font-medium leading-relaxed text-zinc-500 dark:text-zinc-400">
-              {projectModalSubtitle}
+            <span className="mt-1 flex flex-wrap items-center gap-x-2 text-xs font-medium leading-relaxed text-zinc-500 dark:text-zinc-400">
+              <span>{projectModalSubtitle}</span>
+              {projectForm.id && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void navigator.clipboard.writeText(projectForm.id);
+                    toast("success", "Project ID copied to clipboard");
+                  }}
+                  className="inline-flex items-center gap-1 rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-mono font-medium text-zinc-600 outline-none transition-colors hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
+                  title="Click to copy Project ID"
+                >
+                  <span className="opacity-70">ID:</span>
+                  <span className="font-semibold select-all">{projectForm.id}</span>
+                  <Copy size={10} className="text-zinc-400" />
+                </button>
+              )}
             </span>
           </span>
         }
@@ -2067,8 +2123,24 @@ export const ReportMonitoringPage: React.FC = () => {
             <span className="block text-lg font-extrabold text-zinc-900 dark:text-white">
               {reportModalTitle}
             </span>
-            <span className="mt-1 block text-xs font-medium leading-relaxed text-zinc-500 dark:text-zinc-400">
-              {reportModalSubtitle}
+            <span className="mt-1 flex flex-wrap items-center gap-x-2 text-xs font-medium leading-relaxed text-zinc-500 dark:text-zinc-400">
+              <span>{reportModalSubtitle}</span>
+              {reportForm.id && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void navigator.clipboard.writeText(reportForm.id);
+                    toast("success", "Report ID copied to clipboard");
+                  }}
+                  className="inline-flex items-center gap-1 rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-mono font-medium text-zinc-600 outline-none transition-colors hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
+                  title="Click to copy Report ID"
+                >
+                  <span className="opacity-70">ID:</span>
+                  <span className="font-semibold select-all">{reportForm.id}</span>
+                  <Copy size={10} className="text-zinc-400" />
+                </button>
+              )}
             </span>
           </span>
         }
