@@ -249,6 +249,7 @@ export const ReportMonitoringPage: React.FC = () => {
   const canEditReport = useCallback(
     (report: ReportSubmission) => {
       if (isSuperAdmin) return true;
+      if (report.submittedDate) return false;
       if (!can("reports.edit")) return false;
 
       const project = projectsById.get(report.projectId);
@@ -1272,6 +1273,13 @@ export const ReportMonitoringPage: React.FC = () => {
     );
 
     const worksheet = XLSX.utils.aoa_to_sheet(sheetRows);
+    if (!isSuperAdmin) {
+      worksheet["!protect"] = {
+        password: "psoaurora-lock",
+        selectLockedCells: true,
+        selectUnlockedCells: true,
+      };
+    }
     worksheet["!merges"] = merges;
     worksheet["!cols"] = [
       { wch: 24 },
@@ -1309,6 +1317,9 @@ export const ReportMonitoringPage: React.FC = () => {
         sz: 11,
         color: { rgb: "111827" },
       },
+      protection: {
+        locked: true,
+      },
     };
 
     sheetRows.forEach((row, rowIndex) => {
@@ -1336,6 +1347,9 @@ export const ReportMonitoringPage: React.FC = () => {
             fill: {
               patternType: "solid",
               fgColor: { rgb: isTitle ? "EAF2FF" : "F8FAFC" },
+            },
+            protection: {
+              locked: true,
             },
           };
           worksheet[cellAddress] = cell;
