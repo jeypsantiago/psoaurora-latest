@@ -1556,16 +1556,15 @@ export const ReportMonitoringPage: React.FC = () => {
       <table className="w-full table-fixed border-collapse text-left">
         <colgroup>
           {options.showProject && <col className="w-[12%]" />}
-          <col className={options.showProject ? "w-[14%]" : "w-[15%]"} />
+          <col className={options.showProject ? "w-[15%]" : "w-[17%]"} />
           <col className={options.showProject ? "w-[5%]" : "w-[6%]"} />
-          <col className={options.showProject ? "w-[8%]" : "w-[9%]"} />
-          <col className={options.showProject ? "w-[8%]" : "w-[9%]"} />
-          <col className={options.showProject ? "w-[5%]" : "w-[6%]"} />
-          <col className={options.showProject ? "w-[13%]" : "w-[14%]"} />
+          <col className={options.showProject ? "w-[8%]" : "w-[10%]"} />
+          <col className={options.showProject ? "w-[8%]" : "w-[10%]"} />
+          <col className={options.showProject ? "w-[13%]" : "w-[15%]"} />
           <col className={options.showProject ? "w-[10%]" : "w-[10%]"} />
           <col className={options.showProject ? "w-[7%]" : "w-[7%]"} />
           <col className={options.showProject ? "w-[6%]" : "w-[6%]"} />
-          <col className={options.showProject ? "w-[8%]" : "w-[12%]"} />
+          <col className={options.showProject ? "w-[10%]" : "w-[11%]"} />
           <col className={options.showProject ? "w-[6%]" : "w-[8%]"} />
         </colgroup>
         <thead className="sticky top-0 z-10 bg-zinc-100 dark:bg-zinc-900">
@@ -1576,7 +1575,6 @@ export const ReportMonitoringPage: React.FC = () => {
               "Freq.",
               "Deadline",
               "Submitted",
-              "IPCR",
               "Focal / Office",
               "Reminder Window",
               "Reminder Status",
@@ -1671,9 +1669,6 @@ export const ReportMonitoringPage: React.FC = () => {
                     </span>
                   </td>
                   <td className="border-r border-zinc-100 px-3 py-1.5 align-top dark:border-zinc-800">{renderSubmittedCell(row.report)}</td>
-                  <td className="border-r border-zinc-100 px-2 py-2 text-center align-top dark:border-zinc-800">
-                    {renderIpcrRating(getIpcrRating(row.report.submittedDate, row.report.deadline))}
-                  </td>
                   <td className="max-w-[210px] border-r border-zinc-100 px-3 py-2 align-top dark:border-zinc-800">
                     <p className="truncate text-xs font-bold text-zinc-900 dark:text-white">
                       {row.focal?.name || "Needs attention"}
@@ -1711,7 +1706,7 @@ export const ReportMonitoringPage: React.FC = () => {
                 </tr>
                 {hasHistory && !row.isHistory && isExpanded && (
                   <tr className="bg-zinc-50/20 dark:bg-zinc-950/20">
-                    <td colSpan={options.showProject ? 12 : 11} className="px-4 py-3 align-top">
+                    <td colSpan={options.showProject ? 11 : 10} className="px-4 py-3 align-top">
                       <div className="rounded-xl border border-zinc-200 bg-zinc-50/40 p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/10">
                         <div className="flex items-center gap-2 mb-3">
                           <CalendarClock size={15} className="text-blue-600 dark:text-blue-400" />
