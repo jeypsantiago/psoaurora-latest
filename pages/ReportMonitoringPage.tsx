@@ -1352,18 +1352,29 @@ export const ReportMonitoringPage: React.FC = () => {
         const isLabelRow = meta.type === "project-label";
         const isValueRow = meta.type === "project-value";
         const isNotSub = isValueRow && meta.isNotSubmitted && meta.isNotSubmitted(columnIndex);
+        const isIpcrRatingColumn = isValueRow && columnIndex > 0 && (columnIndex - 1) % 3 === 2;
+        const cellValue = String(cell.v || _value || "").trim();
+        const isIpcrRating1 = isIpcrRatingColumn && cellValue === "1";
+        const isIpcrRating3 = isIpcrRatingColumn && cellValue === "3";
+        const isIpcrRating5 = isIpcrRatingColumn && cellValue === "5";
 
         cell.s = {
           ...baseCellStyle,
           font: {
             ...baseCellStyle.font,
-            bold: isTitleRow || isLabelRow || isProjectColumn,
+            bold: isTitleRow || isLabelRow || isProjectColumn || isIpcrRatingColumn,
             color: {
               rgb: isTitleRow
                 ? "1E3A8A"
-                : isNotSub
+                : isIpcrRating1
                   ? "991B1B"
-                  : "111827",
+                  : isIpcrRating3
+                    ? "713F12"
+                    : isIpcrRating5
+                      ? "065F46"
+                      : isNotSub
+                        ? "991B1B"
+                        : "111827",
             },
           },
           fill: {
@@ -1379,9 +1390,15 @@ export const ReportMonitoringPage: React.FC = () => {
                     : "F8FBFF"
                   : isProjectColumn
                     ? "F8FAFC"
-                    : isNotSub
+                    : isIpcrRating1
                       ? "FEE2E2"
-                      : "FFFFFF",
+                      : isIpcrRating3
+                        ? "FEF9C3"
+                        : isIpcrRating5
+                          ? "D1FAE5"
+                          : isNotSub
+                            ? "FEE2E2"
+                            : "FFFFFF",
             },
           },
         };

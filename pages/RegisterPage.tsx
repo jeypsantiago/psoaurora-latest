@@ -42,6 +42,21 @@ export const RegisterPage: React.FC = () => {
   const { config } = useLandingConfig();
   const navigate = useNavigate();
 
+  const [inviteCode, setInviteCode] = useState("");
+  const [isUnlocked, setIsUnlocked] = useState(false);
+  const [inviteError, setInviteError] = useState("");
+  const [showInviteCode, setShowInviteCode] = useState(false);
+
+  const handleVerifyInvite = (e: React.FormEvent) => {
+    e.preventDefault();
+    setInviteError("");
+    if (inviteCode.trim() === "psoaurora@2026") {
+      setIsUnlocked(true);
+    } else {
+      setInviteError("Invalid invitation code. Please try again.");
+    }
+  };
+
   useEffect(() => {
     if (isReady && currentUser) {
       navigate("/reports?action=new-project", { replace: true });
@@ -197,183 +212,263 @@ export const RegisterPage: React.FC = () => {
             </div>
           </section>
 
-          <PublicCard
-            elevated
-            className="rounded-3xl p-6 sm:p-8 shadow-[0_24px_54px_rgba(0,51,102,0.14)] dark:shadow-[0_28px_60px_rgba(0,0,0,0.46)]"
-          >
-            <div className="flex items-center justify-between gap-4 mb-6">
-              <div>
-                <p className="text-xs uppercase tracking-[0.14em] text-slate-600 dark:text-slate-400 font-semibold">
-                  Self Registration
-                </p>
-                <h2 className="font-serif text-3xl text-psa-navy dark:text-slate-100 mt-1">
-                  Create Account
-                </h2>
-              </div>
-              <div className="w-14 h-14 rounded-2xl bg-psa-blue text-white flex items-center justify-center">
-                <UserPlus className="w-7 h-7" />
-              </div>
-            </div>
-
-            <form className="space-y-5" onSubmit={handleSubmit} noValidate>
-              {error && (
-                <div className="p-3 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/60 rounded-lg flex items-center gap-3 text-red-700 dark:text-red-300 text-sm">
-                  <AlertCircle className="w-4 h-4 shrink-0" />
-                  <span>{error}</span>
-                </div>
-              )}
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {isUnlocked ? (
+            <PublicCard
+              elevated
+              className="rounded-3xl p-6 sm:p-8 shadow-[0_24px_54px_rgba(0,51,102,0.14)] dark:shadow-[0_28px_60px_rgba(0,0,0,0.46)]"
+            >
+              <div className="flex items-center justify-between gap-4 mb-6">
                 <div>
-                  <label htmlFor="name" className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
-                    Full Name
-                  </label>
-                  <input
-                    id="name"
-                    value={form.name}
-                    onChange={(event) => updateField("name", event.target.value)}
-                    onBlur={() => markTouched("name")}
-                    className={`${inputBaseClass} ${fieldClass("name")}`}
-                    placeholder="Enter your full name"
-                  />
-                  {touched.name && fieldErrors.name && <p className="mt-1.5 text-xs text-red-600">{fieldErrors.name}</p>}
+                  <p className="text-xs uppercase tracking-[0.14em] text-slate-600 dark:text-slate-400 font-semibold">
+                    Self Registration
+                  </p>
+                  <h2 className="font-serif text-3xl text-psa-navy dark:text-slate-100 mt-1">
+                    Create Account
+                  </h2>
                 </div>
-                <div>
-                  <label htmlFor="email" className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
-                    Email Address
-                  </label>
-                  <input
-                    id="email"
-                    type="email"
-                    autoComplete="email"
-                    value={form.email}
-                    onChange={(event) => updateField("email", event.target.value)}
-                    onBlur={() => markTouched("email")}
-                    className={`${inputBaseClass} ${fieldClass("email")}`}
-                    placeholder="name@example.com"
-                  />
-                  {touched.email && fieldErrors.email && <p className="mt-1.5 text-xs text-red-600">{fieldErrors.email}</p>}
+                <div className="w-14 h-14 rounded-2xl bg-psa-blue text-white flex items-center justify-center">
+                  <UserPlus className="w-7 h-7" />
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label htmlFor="position" className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
-                    Position
-                  </label>
-                  <input
-                    id="position"
-                    value={form.position}
-                    onChange={(event) => updateField("position", event.target.value)}
-                    className={`${inputBaseClass} ${fieldClass("position")}`}
-                    placeholder="e.g. Project focal"
-                  />
-                </div>
-                <div>
-                  <label htmlFor="gender" className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
-                    Gender
-                  </label>
-                  <select
-                    id="gender"
-                    value={form.gender}
-                    onChange={(event) => updateField("gender", event.target.value)}
-                    className={`${inputBaseClass} ${fieldClass("gender")}`}
-                  >
-                    <option>Male</option>
-                    <option>Female</option>
-                    <option>Prefer not to say</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label htmlFor="password" className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
-                    Password
-                  </label>
-                  <div className="relative">
-                    <input
-                      id="password"
-                      type={showPassword ? "text" : "password"}
-                      autoComplete="new-password"
-                      value={form.password}
-                      onChange={(event) => updateField("password", event.target.value)}
-                      onBlur={() => markTouched("password")}
-                      className={`${iconInputClass} ${fieldClass("password")}`}
-                      placeholder="Minimum 8 characters"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword((value) => !value)}
-                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300"
-                    >
-                      {showPassword ? <EyeOff className="h-[18px] w-[18px]" /> : <Eye className="h-[18px] w-[18px]" />}
-                    </button>
+              <form className="space-y-5" onSubmit={handleSubmit} noValidate>
+                {error && (
+                  <div className="p-3 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/60 rounded-lg flex items-center gap-3 text-red-700 dark:text-red-300 text-sm">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>{error}</span>
                   </div>
-                  {touched.password && fieldErrors.password && <p className="mt-1.5 text-xs text-red-600">{fieldErrors.password}</p>}
-                </div>
-                <div>
-                  <label htmlFor="confirm-password" className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
-                    Confirm Password
-                  </label>
-                  <div className="relative">
-                    <input
-                      id="confirm-password"
-                      type={showConfirmPassword ? "text" : "password"}
-                      autoComplete="new-password"
-                      value={form.confirmPassword}
-                      onChange={(event) => updateField("confirmPassword", event.target.value)}
-                      onBlur={() => markTouched("confirmPassword")}
-                      className={`${iconInputClass} ${fieldClass("confirmPassword")}`}
-                      placeholder="Repeat password"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowConfirmPassword((value) => !value)}
-                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300"
-                    >
-                      {showConfirmPassword ? <EyeOff className="h-[18px] w-[18px]" /> : <Eye className="h-[18px] w-[18px]" />}
-                    </button>
-                  </div>
-                  {touched.confirmPassword && fieldErrors.confirmPassword ? (
-                    <p className="mt-1.5 text-xs text-red-600">{fieldErrors.confirmPassword}</p>
-                  ) : form.confirmPassword && !fieldErrors.confirmPassword ? (
-                    <p className="mt-1.5 text-xs text-emerald-700 inline-flex items-center gap-1.5">
-                      <CheckCircle2 className="w-3.5 h-3.5" /> Passwords match
-                    </p>
-                  ) : null}
-                </div>
-              </div>
-
-              <PublicButton
-                type="submit"
-                disabled={isLoading}
-                variant="primary"
-                size="lg"
-                fullWidth
-                className="font-bold"
-              >
-                {isLoading ? (
-                  <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                ) : (
-                  <>
-                    Create Account <ArrowRight className="w-4 h-4" strokeWidth={2.5} />
-                  </>
                 )}
-              </PublicButton>
 
-              <p className="text-center text-xs text-slate-500 dark:text-slate-400">
-                Already have an account?{" "}
-                <button
-                  type="button"
-                  onClick={() => navigate("/login")}
-                  className="font-bold text-psa-blue dark:text-blue-300 hover:text-psa-navy dark:hover:text-white"
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label htmlFor="name" className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
+                      Full Name
+                    </label>
+                    <input
+                      id="name"
+                      value={form.name}
+                      onChange={(event) => updateField("name", event.target.value)}
+                      onBlur={() => markTouched("name")}
+                      className={`${inputBaseClass} ${fieldClass("name")}`}
+                      placeholder="Enter your full name"
+                    />
+                    {touched.name && fieldErrors.name && <p className="mt-1.5 text-xs text-red-600">{fieldErrors.name}</p>}
+                  </div>
+                  <div>
+                    <label htmlFor="email" className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
+                      Email Address
+                    </label>
+                    <input
+                      id="email"
+                      type="email"
+                      autoComplete="email"
+                      value={form.email}
+                      onChange={(event) => updateField("email", event.target.value)}
+                      onBlur={() => markTouched("email")}
+                      className={`${inputBaseClass} ${fieldClass("email")}`}
+                      placeholder="Enter your email"
+                    />
+                    {touched.email && fieldErrors.email && <p className="mt-1.5 text-xs text-red-600">{fieldErrors.email}</p>}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label htmlFor="position" className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
+                      Position / Designation
+                    </label>
+                    <input
+                      id="position"
+                      value={form.position}
+                      onChange={(event) => updateField("position", event.target.value)}
+                      onBlur={() => markTouched("position")}
+                      className={`${inputBaseClass} ${fieldClass("position")}`}
+                      placeholder="e.g. focal person, statistician"
+                    />
+                    {touched.position && fieldErrors.position && <p className="mt-1.5 text-xs text-red-600">{fieldErrors.position}</p>}
+                  </div>
+                  <div>
+                    <label htmlFor="gender" className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
+                      Gender
+                    </label>
+                    <select
+                      id="gender"
+                      value={form.gender}
+                      onChange={(event) => updateField("gender", event.target.value)}
+                      className="w-full border border-slate-300 dark:border-zinc-700 rounded-lg px-4 py-3 text-sm bg-white text-slate-900 placeholder-slate-400 dark:bg-[#0f0f0f] dark:text-slate-100 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:border-psa-blue dark:focus:border-zinc-500 focus:ring-psa-blue/20 dark:focus:ring-zinc-500/20"
+                    >
+                      <option value="Male">Male</option>
+                      <option value="Female">Female</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label htmlFor="password" className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
+                      Password
+                    </label>
+                    <div className="relative">
+                      <input
+                        id="password"
+                        type={showPassword ? "text" : "password"}
+                        autoComplete="new-password"
+                        value={form.password}
+                        onChange={(event) => updateField("password", event.target.value)}
+                        onBlur={() => markTouched("password")}
+                        className={`${iconInputClass} ${fieldClass("password")}`}
+                        placeholder="Minimum 8 characters"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword((value) => !value)}
+                        className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300"
+                      >
+                        {showPassword ? <EyeOff className="h-[18px] w-[18px]" /> : <Eye className="h-[18px] w-[18px]" />}
+                      </button>
+                    </div>
+                    {touched.password && fieldErrors.password && <p className="mt-1.5 text-xs text-red-600">{fieldErrors.password}</p>}
+                  </div>
+                  <div>
+                    <label htmlFor="confirm-password" className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
+                      Confirm Password
+                    </label>
+                    <div className="relative">
+                      <input
+                        id="confirm-password"
+                        type={showConfirmPassword ? "text" : "password"}
+                        autoComplete="new-password"
+                        value={form.confirmPassword}
+                        onChange={(event) => updateField("confirmPassword", event.target.value)}
+                        onBlur={() => markTouched("confirmPassword")}
+                        className={`${iconInputClass} ${fieldClass("confirmPassword")}`}
+                        placeholder="Repeat password"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmPassword((value) => !value)}
+                        className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300"
+                      >
+                        {showConfirmPassword ? <EyeOff className="h-[18px] w-[18px]" /> : <Eye className="h-[18px] w-[18px]" />}
+                      </button>
+                    </div>
+                    {touched.confirmPassword && fieldErrors.confirmPassword ? (
+                      <p className="mt-1.5 text-xs text-red-600">{fieldErrors.confirmPassword}</p>
+                    ) : form.confirmPassword && !fieldErrors.confirmPassword ? (
+                      <p className="mt-1.5 text-xs text-emerald-700 inline-flex items-center gap-1.5">
+                        <CheckCircle2 className="w-3.5 h-3.5" /> Passwords match
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+
+                <PublicButton
+                  type="submit"
+                  disabled={isLoading}
+                  variant="primary"
+                  size="lg"
+                  fullWidth
+                  className="font-bold"
                 >
-                  Sign in
-                </button>
+                  {isLoading ? (
+                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  ) : (
+                    <>
+                      Create Account <ArrowRight className="w-4 h-4" strokeWidth={2.5} />
+                    </>
+                  )}
+                </PublicButton>
+
+                <p className="text-center text-xs text-slate-500 dark:text-slate-400">
+                  Already have an account?{" "}
+                  <button
+                    type="button"
+                    onClick={() => navigate("/login")}
+                    className="font-bold text-psa-blue dark:text-blue-300 hover:text-psa-navy dark:hover:text-white"
+                  >
+                    Sign in
+                  </button>
+                </p>
+              </form>
+            </PublicCard>
+          ) : (
+            <PublicCard
+              elevated
+              className="rounded-3xl p-6 sm:p-8 shadow-[0_24px_54px_rgba(0,51,102,0.14)] dark:shadow-[0_28px_60px_rgba(0,0,0,0.46)] flex flex-col justify-center"
+            >
+              <div className="flex items-center justify-between gap-4 mb-6">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.14em] text-slate-600 dark:text-slate-400 font-semibold">
+                    Access Code Required
+                  </p>
+                  <h2 className="font-serif text-3xl text-psa-navy dark:text-slate-100 mt-1">
+                    Enter Invite Code
+                  </h2>
+                </div>
+                <div className="w-14 h-14 rounded-2xl bg-amber-500 text-white flex items-center justify-center">
+                  <Shield className="w-7 h-7" />
+                </div>
+              </div>
+
+              <p className="text-slate-600 dark:text-slate-350 text-sm leading-relaxed mb-6">
+                Registration is limited to authorized focal persons and statisticians of PSA Aurora. Please enter the invitation code provided by the administrator to unlock the registration form.
               </p>
-            </form>
-          </PublicCard>
+
+              <form onSubmit={handleVerifyInvite} className="space-y-4">
+                {inviteError && (
+                  <div className="p-3 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/60 rounded-lg flex items-center gap-3 text-red-700 dark:text-red-300 text-sm">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>{inviteError}</span>
+                  </div>
+                )}
+
+                <div className="space-y-1.5">
+                  <label htmlFor="invite-code" className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                    Invitation Code
+                  </label>
+                  <div className="relative">
+                    <input
+                      id="invite-code"
+                      type={showInviteCode ? "text" : "password"}
+                      value={inviteCode}
+                      onChange={(e) => setInviteCode(e.target.value)}
+                      className="w-full border border-slate-300 dark:border-zinc-700 rounded-lg pl-4 pr-10 py-3 text-sm bg-white text-slate-900 placeholder-slate-400 dark:bg-[#0f0f0f] dark:text-slate-100 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:border-psa-blue dark:focus:border-zinc-500 focus:ring-psa-blue/20 dark:focus:ring-zinc-500/20"
+                      placeholder="Enter security invite code"
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowInviteCode((value) => !value)}
+                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300"
+                    >
+                      {showInviteCode ? <EyeOff className="h-[18px] w-[18px]" /> : <Eye className="h-[18px] w-[18px]" />}
+                    </button>
+                  </div>
+                </div>
+
+                <PublicButton
+                  type="submit"
+                  variant="primary"
+                  size="lg"
+                  fullWidth
+                  className="font-bold mt-2"
+                >
+                  Unlock Registration <ArrowRight className="w-4 h-4" strokeWidth={2.5} />
+                </PublicButton>
+
+                <p className="text-center text-xs text-slate-500 dark:text-slate-400 mt-4">
+                  Back to portal?{" "}
+                  <button
+                    type="button"
+                    onClick={() => navigate("/login")}
+                    className="font-bold text-psa-blue dark:text-blue-300 hover:text-psa-navy dark:hover:text-white"
+                  >
+                    Sign in
+                  </button>
+                </p>
+              </form>
+            </PublicCard>
+          )}
         </div>
       </main>
 

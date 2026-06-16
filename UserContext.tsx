@@ -341,18 +341,19 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     dispatchThemeSync();
     syncRolesFromStorage();
     syncCurrentUserFromAuthStore();
-    setIsReady(true);
 
-    runWhenIdle(() => {
-      void (async () => {
+    void (async () => {
+      try {
         await hydrateManagedStateToLocalStorage(ownerId);
         dispatchThemeSync();
         syncRolesFromStorage();
         await refreshUsers();
-      })().catch((error) => {
+      } catch (error) {
         console.error('Failed to hydrate background user workspace state.', error);
-      });
-    });
+      } finally {
+        setIsReady(true);
+      }
+    })();
   }, [refreshUsers, syncCurrentUserFromAuthStore, syncRolesFromStorage]);
 
   useEffect(() => {
@@ -627,55 +628,57 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
       throw new Error('Email and password are required.');
     }
 
-    const cachedSession = await readFastLoginSession(identity, secret);
-    if (cachedSession) {
-      backend.authStore.save(cachedSession.token, cachedSession.record);
-      void backend.authStore.refresh().then((result) => {
+    setIsReady(false);
+    try {
+      const cachedSession = await readFastLoginSession(identity, secret);
+      if (cachedSession) {
+        backend.authStore.save(cachedSession.token, cachedSession.record);
+        void backend.authStore.refresh().then((result) => {
+          void writeFastLoginSession(identity, secret, {
+            token: result.token,
+            record: result.record || {},
+            cachedAt: Date.now(),
+          });
+          syncCurrentUserFromAuthStore();
+        }).catch((error) => {
+          void clearFastLoginSession(identity);
+          console.error('Cached login session could not be refreshed.', error);
+        });
+      } else {
+        const result = await backend.collection('users').authWithPassword(identity, secret);
         void writeFastLoginSession(identity, secret, {
           token: result.token,
           record: result.record || {},
           cachedAt: Date.now(),
         });
-        syncCurrentUserFromAuthStore();
-      }).catch((error) => {
-        void clearFastLoginSession(identity);
-        console.error('Cached login session could not be refreshed.', error);
+      }
+
+      if (!backend.authStore.record) {
+        throw new Error('Authentication succeeded but no account record was returned.');
+      }
+
+      const ownerId = String(backend.authStore.record.id);
+
+      void backend.collection('users').update(ownerId, {
+        lastAccess: new Date().toISOString(),
+      }).catch(() => {
+        // Non-fatal for login flow
       });
-    } else {
-      const result = await backend.collection('users').authWithPassword(identity, secret);
-      void writeFastLoginSession(identity, secret, {
-        token: result.token,
-        record: result.record || {},
-        cachedAt: Date.now(),
-      });
+
+      dispatchThemeSync();
+      syncRolesFromStorage();
+      syncCurrentUserFromAuthStore();
+
+      await hydrateManagedStateToLocalStorage(ownerId);
+      dispatchThemeSync();
+      syncRolesFromStorage();
+      await refreshUsers();
+    } catch (e) {
+      setIsReady(true);
+      throw e;
+    } finally {
+      setIsReady(true);
     }
-
-    if (!backend.authStore.record) {
-      throw new Error('Authentication succeeded but no account record was returned.');
-    }
-
-    const ownerId = String(backend.authStore.record.id);
-
-    void backend.collection('users').update(ownerId, {
-      lastAccess: new Date().toISOString(),
-    }).catch(() => {
-      // Non-fatal for login flow
-    });
-
-    dispatchThemeSync();
-    syncRolesFromStorage();
-    syncCurrentUserFromAuthStore();
-
-    runWhenIdle(() => {
-      void (async () => {
-        await hydrateManagedStateToLocalStorage(ownerId);
-        dispatchThemeSync();
-        syncRolesFromStorage();
-        await refreshUsers();
-      })().catch((error) => {
-        console.error('Failed to hydrate user workspace after login.', error);
-      });
-    });
   }, [refreshUsers, syncCurrentUserFromAuthStore, syncRolesFromStorage]);
 
   const register = useCallback(async (input: {
@@ -685,33 +688,36 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     gender: string;
     password: string;
   }) => {
-    const response = await fetch('/api/register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(input),
-    });
-    const result = await response.json().catch(() => null);
-
-    if (!response.ok || !result?.ok || !result?.token || !result?.record) {
-      throw new Error(result?.message || 'Unable to create account.');
-    }
-
-    backend.authStore.save(String(result.token), result.record);
-    const ownerId = String(result.record.id);
-
-    dispatchThemeSync();
-    syncRolesFromStorage();
-    syncCurrentUserFromAuthStore();
-    runWhenIdle(() => {
-      void (async () => {
-        await hydrateManagedStateToLocalStorage(ownerId);
-        dispatchThemeSync();
-        syncRolesFromStorage();
-        await refreshUsers();
-      })().catch((error) => {
-        console.error('Failed to hydrate user workspace after registration.', error);
+    setIsReady(false);
+    try {
+      const response = await fetch('/api/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
       });
-    });
+      const result = await response.json().catch(() => null);
+
+      if (!response.ok || !result?.ok || !result?.token || !result?.record) {
+        throw new Error(result?.message || 'Unable to create account.');
+      }
+
+      backend.authStore.save(String(result.token), result.record);
+      const ownerId = String(result.record.id);
+
+      dispatchThemeSync();
+      syncRolesFromStorage();
+      syncCurrentUserFromAuthStore();
+
+      await hydrateManagedStateToLocalStorage(ownerId);
+      dispatchThemeSync();
+      syncRolesFromStorage();
+      await refreshUsers();
+    } catch (e) {
+      setIsReady(true);
+      throw e;
+    } finally {
+      setIsReady(true);
+    }
   }, [refreshUsers, syncCurrentUserFromAuthStore, syncRolesFromStorage]);
 
   const requestPasswordReset = useCallback(async (email: string) => {
@@ -778,5 +784,21 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
 export const useUsers = () => {
   const context = useContext(UserContext);
   if (!context) throw new Error('useUsers must be used within a UserProvider');
-  return context;
+
+  const isSuperAdmin = Boolean(
+    context.currentUser?.isSuperAdmin || 
+    context.currentUser?.roles?.includes("Super Admin")
+  );
+
+  const filteredUsers = React.useMemo(() => {
+    if (isSuperAdmin) return context.users;
+    return context.users.filter(
+      (u) => !u.isSuperAdmin && !u.roles?.includes("Super Admin")
+    );
+  }, [context.users, isSuperAdmin]);
+
+  return React.useMemo(() => ({
+    ...context,
+    users: filteredUsers,
+  }), [context, filteredUsers]);
 };
