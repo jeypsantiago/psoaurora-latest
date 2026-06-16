@@ -2,6 +2,8 @@ import net from 'node:net';
 import tls from 'node:tls';
 import crypto from 'node:crypto';
 import PocketBase from 'pocketbase';
+import fs from 'node:fs';
+
 
 export const REPORT_REMINDER_KEYS = {
   projects: 'aurora_report_projects',
@@ -822,26 +824,101 @@ export const parseEmailReply = (bodyText, replyDate) => {
     return { ok: false, reason: 'No submission keywords (submitted, completed, done, etc.) found in the response.' };
   }
 
-  // 1. Look for YYYY-MM-DD
-  const yyyymmdd = cleanBody.match(/\b(\d{4})[-/](\d{1,2})[-/](\d{1,2})\b/);
-  if (yyyymmdd) {
-    const year = parseInt(yyyymmdd[1], 10);
-    const month = String(yyyymmdd[2]).padStart(2, '0');
-    const day = String(yyyymmdd[3]).padStart(2, '0');
-    return { ok: true, date: `${year}-${month}-${day}` };
-  }
-
-  // 2. Look for MM/DD/YYYY
-  const mmddyyyy = cleanBody.match(/\b(\d{1,2})[-/](\d{1,2})[-/](\d{4})\b/);
-  if (mmddyyyy) {
-    const year = parseInt(mmddyyyy[3], 10);
-    const month = String(mmddyyyy[1]).padStart(2, '0');
-    const day = String(mmddyyyy[2]).padStart(2, '0');
-    return { ok: true, date: `${year}-${month}-${day}` };
-  }
-
-  // 3. Look for relative terms
   const emailDate = replyDate ? new Date(replyDate) : new Date();
+  const fallbackYear = Number.isNaN(emailDate.getTime()) ? new Date().getFullYear() : emailDate.getFullYear();
+
+  const extractDateFromString = (str) => {
+    // 1. Look for YYYY-MM-DD
+    const yyyymmdd = str.match(/\b(\d{4})[-/](\d{1,2})[-/](\d{1,2})\b/);
+    if (yyyymmdd) {
+      const year = parseInt(yyyymmdd[1], 10);
+      const month = String(yyyymmdd[2]).padStart(2, '0');
+      const day = String(yyyymmdd[3]).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+
+    // 2. Look for MM/DD/YYYY
+    const mmddyyyy = str.match(/\b(\d{1,2})[-/](\d{1,2})[-/](\d{4})\b/);
+    if (mmddyyyy) {
+      const year = parseInt(mmddyyyy[3], 10);
+      const month = String(mmddyyyy[1]).padStart(2, '0');
+      const day = String(mmddyyyy[2]).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+
+    // 3. Look for written month name (e.g. "june 15, 2026" or "15 june 2026")
+    const monthMap = {
+      january: 0, jan: 0,
+      february: 1, feb: 1,
+      march: 2, mar: 2,
+      april: 3, apr: 3,
+      may: 4,
+      june: 5, jun: 5,
+      july: 6, jul: 6,
+      august: 7, aug: 7,
+      september: 8, sep: 8,
+      october: 9, oct: 9,
+      november: 10, nov: 10,
+      december: 11, dec: 11
+    };
+
+    const format1 = /\b(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\s+(\d{1,2})(?:st|nd|rd|th)?(?:\s*,?\s*(\d{4}))?\b/i;
+    const format2 = /\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)(?:\s*,?\s*(\d{4}))?\b/i;
+
+    const match1 = str.match(format1);
+    if (match1) {
+      const monthIndex = monthMap[match1[1].toLowerCase()];
+      const day = parseInt(match1[2], 10);
+      const year = match1[3] ? parseInt(match1[3], 10) : fallbackYear;
+      if (monthIndex !== undefined && !Number.isNaN(day) && day >= 1 && day <= 31) {
+        const d = new Date(year, monthIndex, day);
+        if (!Number.isNaN(d.getTime())) {
+          const y = d.getFullYear();
+          const m = String(d.getMonth() + 1).padStart(2, '0');
+          const dayStr = String(d.getDate()).padStart(2, '0');
+          return `${y}-${m}-${dayStr}`;
+        }
+      }
+    }
+
+    const match2 = str.match(format2);
+    if (match2) {
+      const day = parseInt(match2[1], 10);
+      const monthIndex = monthMap[match2[2].toLowerCase()];
+      const year = match2[3] ? parseInt(match2[3], 10) : fallbackYear;
+      if (monthIndex !== undefined && !Number.isNaN(day) && day >= 1 && day <= 31) {
+        const d = new Date(year, monthIndex, day);
+        if (!Number.isNaN(d.getTime())) {
+          const y = d.getFullYear();
+          const m = String(d.getMonth() + 1).padStart(2, '0');
+          const dayStr = String(d.getDate()).padStart(2, '0');
+          return `${y}-${m}-${dayStr}`;
+        }
+      }
+    }
+
+    return null;
+  };
+
+  // Split bodyText into lines and look for date pattern on lines containing any keyword first
+  const lines = cleanBody.split(/\r?\n/);
+  for (const line of lines) {
+    const hasLineKeyword = keywords.some(kw => line.includes(kw));
+    if (hasLineKeyword) {
+      const parsed = extractDateFromString(line);
+      if (parsed) {
+        return { ok: true, date: parsed };
+      }
+    }
+  }
+
+  // Fallback: try parsing date from the entire body
+  const parsedDate = extractDateFromString(cleanBody);
+  if (parsedDate) {
+    return { ok: true, date: parsedDate };
+  }
+
+  // 4. Look for relative terms
   if (Number.isNaN(emailDate.getTime())) {
     return { ok: true, date: new Date().toISOString().slice(0, 10) };
   }
@@ -896,6 +973,20 @@ export const processInboundReply = async (reportId, senderEmail, rawMime, replyD
   const cleanBodyText = cleanEmailBody(parsedText);
 
   const parseResult = parseEmailReply(cleanBodyText, replyDate);
+  try {
+    fs.writeFileSync('f:/PROJECTS/psoaurora-latest/inbound-email-debug.json', JSON.stringify({
+      timestamp: new Date().toISOString(),
+      reportId,
+      senderEmail,
+      replyDate,
+      rawMime,
+      parsedText,
+      cleanBodyText,
+      parseResult
+    }, null, 2), 'utf8');
+  } catch (err) {
+    console.error('Failed to write inbound email debug file:', err);
+  }
   if (!parseResult.ok) {
     throw new Error(`Parse failed: ${parseResult.reason}`);
   }

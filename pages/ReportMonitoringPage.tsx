@@ -6,6 +6,7 @@ import {
   Bell,
   CalendarClock,
   ChevronDown,
+  ChevronUp,
   CheckCircle2,
   ClipboardCheck,
   Copy,
@@ -35,6 +36,7 @@ import {
   getGeneratedPeriodLabel,
   getReportLeadDays,
   getReportStatus,
+  getIpcrRating,
   isReportHistoryRecord,
   normalizeReportSeries,
   REPORT_FREQUENCY_OPTIONS,
@@ -167,6 +169,13 @@ export const ReportMonitoringPage: React.FC = () => {
   const [recordScope, setRecordScope] = useState<RecordScope>("current");
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [projectReportView, setProjectReportView] = useState<ProjectReportView>("active");
+  const [expandedReportSeries, setExpandedReportSeries] = useState<Record<string, boolean>>({});
+  const toggleSeriesExpanded = useCallback((seriesId: string) => {
+    setExpandedReportSeries((prev) => ({
+      ...prev,
+      [seriesId]: !prev[seriesId],
+    }));
+  }, []);
   const [projectReportQuery, setProjectReportQuery] = useState("");
   const [projectSearchQuery, setProjectSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<ReportStatus | "all">("all");
@@ -375,6 +384,26 @@ export const ReportMonitoringPage: React.FC = () => {
       return { report, project, focal, status, leadDays, lastReminder, isHistory, hasCurrentNext };
     }),
   [projectsById, reminderLog, settings, usersById, visibleReports]);
+
+  const historyMap = useMemo(() => {
+    const map = new Map<string, ReportRow[]>();
+    for (const r of allReportRows) {
+      if (r.isHistory) {
+        const sId = r.report.seriesId || r.report.id;
+        const list = map.get(sId) || [];
+        list.push(r);
+        map.set(sId, list);
+      }
+    }
+    for (const list of map.values()) {
+      list.sort(
+        (a, b) =>
+          (Date.parse(`${b.report.deadline}T00:00:00`) || 0) -
+          (Date.parse(`${a.report.deadline}T00:00:00`) || 0),
+      );
+    }
+    return map;
+  }, [allReportRows]);
 
   const reportRows = useMemo(() => {
     return allReportRows
@@ -610,14 +639,6 @@ export const ReportMonitoringPage: React.FC = () => {
   const filteredVisibleProjectRows = applyReportFilters(visibleProjectRows, false);
   const filteredReportRows = applyReportFilters(reportRows, true);
   const rightPanelRows = activeTab === "projects" ? filteredVisibleProjectRows : filteredReportRows;
-  const summaryExportRows =
-    activeTab === "projects"
-      ? filteredProjectGroups.flatMap((group) => {
-          if (!group) return [];
-          const rows = projectReportView === "history" ? group.historyRows : group.currentRows;
-          return applyReportFilters(rows, false);
-        })
-      : rightPanelRows;
   const rightPanelTitle =
     activeTab === "projects"
       ? selectedProjectGroup?.project.name || "Project Reports"
@@ -851,6 +872,37 @@ export const ReportMonitoringPage: React.FC = () => {
     }
   };
 
+  const reactivateReport = () => {
+    if (!isSuperAdmin) {
+      toast("error", "Only Super Admins can reactivate reports.");
+      return;
+    }
+    if (!can("reports.edit")) return;
+    const existingReport = reports.find((r) => r.id === reportForm.id);
+    if (!existingReport) return;
+    if (!canEditReport(existingReport)) {
+      toast("error", "You do not have permission to edit this report.");
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const updatedReport: ReportSubmission = {
+      ...existingReport,
+      submittedDate: undefined,
+      archived: false,
+      updatedAt: now,
+    };
+
+    setReports((prev) => {
+      const filtered = prev.filter((r) => r.generatedFromReportId !== updatedReport.id);
+      return filtered.map((r) => (r.id === updatedReport.id ? updatedReport : r));
+    });
+
+    setIsReportModalOpen(false);
+    toast("success", "Report reactivated and restored to Active tab.");
+  };
+
+
   const deleteProject = async (project: ReportProject) => {
     if (!canDeleteProject(project)) return;
     const ok = await confirm(
@@ -1039,18 +1091,32 @@ export const ReportMonitoringPage: React.FC = () => {
   };
 
   const exportSummaryExcel = async () => {
-    const rows = summaryExportRows;
-    if (rows.length === 0) {
+    const targetProjectIds = new Set<string>();
+    if (activeTab === "projects") {
+      filteredProjectGroups.forEach((g) => {
+        if (g?.project.id) targetProjectIds.add(g.project.id);
+      });
+    } else {
+      rightPanelRows.forEach((r) => {
+        if (r.report.projectId) targetProjectIds.add(r.report.projectId);
+      });
+    }
+
+    if (targetProjectIds.size === 0) {
       toast("warning", "No report rows to export.");
       return;
     }
+
+    const exportRows = allReportRows.filter(
+      (row) => row.project?.id && targetProjectIds.has(row.project.id)
+    );
 
     const XLSXStyle = await import("xlsx-js-style");
     const XLSX =
       (XLSXStyle as unknown as { default?: typeof XLSXStyle }).default || XLSXStyle;
 
     const groupedRows = new Map<string, { projectName: string; rows: ReportRow[] }>();
-    for (const row of rows) {
+    for (const row of exportRows) {
       const projectKey = row.project?.id || row.report.projectId || "missing-project";
       const projectName = row.project?.name || "Missing project";
       const group = groupedRows.get(projectKey);
@@ -1061,45 +1127,131 @@ export const ReportMonitoringPage: React.FC = () => {
       }
     }
 
-    const headerRowCount = 3;
     const generatedDate = new Date().toLocaleDateString("en-PH", {
       month: "long",
       day: "numeric",
       year: "numeric",
     });
+
     const sheetRows: Array<Array<string>> = [
       ["REPORT MONITORING SUMMARY"],
       [`Generated on ${generatedDate}`],
       [],
     ];
+
+    interface RowMetadata {
+      type: "header-title" | "header-subtitle" | "header-space" | "project-title" | "project-label" | "project-value" | "project-space";
+      isNotSubmitted?: (colIndex: number) => boolean;
+    }
+
+    const rowMetadata: RowMetadata[] = [
+      { type: "header-title" },
+      { type: "header-subtitle" },
+      { type: "header-space" },
+    ];
+
     const merges: Range[] = [];
 
     for (const group of groupedRows.values()) {
-      const titleRowIndex = sheetRows.length;
-      const titleRow = ["Project/Activity"];
-      const labelRow = [group.projectName];
-      const valueRow = [""];
+      const seriesGroupsMap = new Map<string, ReportRow[]>();
+      group.rows.forEach((row) => {
+        const seriesKey = row.report.seriesId || row.report.title;
+        const list = seriesGroupsMap.get(seriesKey) || [];
+        list.push(row);
+        seriesGroupsMap.set(seriesKey, list);
+      });
 
-      group.rows.forEach((row, index) => {
-        const startColumn = 1 + index * 2;
-        titleRow[startColumn] = row.report.title;
-        titleRow[startColumn + 1] = "";
-        labelRow[startColumn] = "Deadline";
-        labelRow[startColumn + 1] = "Date Submitted";
-        valueRow[startColumn] = formatReportDate(row.report.deadline);
-        valueRow[startColumn + 1] = row.report.submittedDate
-          ? formatReportDate(row.report.submittedDate)
-          : "Not submitted";
-        merges.push({
-          s: { r: titleRowIndex, c: startColumn },
-          e: { r: titleRowIndex, c: startColumn + 1 },
+      const sortedSeriesKeys = Array.from(seriesGroupsMap.keys());
+      sortedSeriesKeys.sort((a, b) => a.localeCompare(b));
+
+      seriesGroupsMap.forEach((rows) => {
+        rows.sort((a, b) => {
+          return (
+            (Date.parse(`${a.report.deadline}T00:00:00`) || 0) -
+            (Date.parse(`${b.report.deadline}T00:00:00`) || 0)
+          );
         });
       });
 
-      sheetRows.push(titleRow, labelRow, valueRow, []);
+      let maxSubmissions = 0;
+      seriesGroupsMap.forEach((rows) => {
+        if (rows.length > maxSubmissions) maxSubmissions = rows.length;
+      });
+
+      const titleRowIndex = sheetRows.length;
+      const titleRow = ["Project/Activity"];
+      const labelRow = [group.projectName];
+
+      const projectColumnCount = 1 + sortedSeriesKeys.length * 3;
+      const valueRows: string[][] = Array.from({ length: maxSubmissions }, () =>
+        Array.from({ length: projectColumnCount }, () => "")
+      );
+
+      sortedSeriesKeys.forEach((seriesKey, seriesIndex) => {
+        const startColumn = 1 + seriesIndex * 3;
+        const submissions = seriesGroupsMap.get(seriesKey) || [];
+        const displayTitle = submissions[0]?.report.title || seriesKey;
+
+        titleRow[startColumn] = displayTitle;
+        titleRow[startColumn + 1] = "";
+        titleRow[startColumn + 2] = "";
+
+        labelRow[startColumn] = "Deadline";
+        labelRow[startColumn + 1] = "Date Submitted";
+        labelRow[startColumn + 2] = "IPCR Rating";
+
+        for (let i = 0; i < maxSubmissions; i++) {
+          const rowVal = valueRows[i];
+          const sub = submissions[i];
+          if (sub) {
+            rowVal[startColumn] = formatReportDate(sub.report.deadline);
+            rowVal[startColumn + 1] = sub.report.submittedDate
+              ? formatReportDate(sub.report.submittedDate)
+              : "Not submitted";
+            rowVal[startColumn + 2] = sub.report.submittedDate
+              ? String(getIpcrRating(sub.report.submittedDate, sub.report.deadline) ?? "-")
+              : "-";
+          } else {
+            rowVal[startColumn] = "";
+            rowVal[startColumn + 1] = "";
+            rowVal[startColumn + 2] = "";
+          }
+        }
+
+        merges.push({
+          s: { r: titleRowIndex, c: startColumn },
+          e: { r: titleRowIndex, c: startColumn + 2 },
+        });
+      });
+
+      sheetRows.push(titleRow);
+      rowMetadata.push({ type: "project-title" });
+
+      sheetRows.push(labelRow);
+      rowMetadata.push({ type: "project-label" });
+
+      valueRows.forEach((rowVal) => {
+        sheetRows.push(rowVal);
+        rowMetadata.push({
+          type: "project-value",
+          isNotSubmitted: (colIdx) => rowVal[colIdx] === "Not submitted",
+        });
+      });
+
+      sheetRows.push([]);
+      rowMetadata.push({ type: "project-space" });
     }
 
     const maxColumnCount = Math.max(1, ...sheetRows.map((row) => row.length));
+
+    sheetRows.forEach((row, idx) => {
+      const meta = rowMetadata[idx];
+      if (meta.type === "header-space" || meta.type === "project-space") return;
+      while (row.length < maxColumnCount) {
+        row.push("");
+      }
+    });
+
     sheetRows[0] = [
       sheetRows[0][0],
       ...Array.from({ length: maxColumnCount - 1 }, () => ""),
@@ -1128,11 +1280,15 @@ export const ReportMonitoringPage: React.FC = () => {
       })),
     ];
     worksheet["!rows"] = sheetRows.map((_, index) => {
-      if (index === 0) return { hpt: 30 };
-      if (index === 1) return { hpt: 21 };
-      if (index === 2) return { hpt: 8 };
-      const blockRow = (index - headerRowCount) % 4;
-      return { hpt: blockRow === 3 ? 8 : blockRow === 0 ? 24 : 21 };
+      const meta = rowMetadata[index];
+      if (meta.type === "header-title") return { hpt: 30 };
+      if (meta.type === "header-subtitle") return { hpt: 21 };
+      if (meta.type === "header-space") return { hpt: 8 };
+      if (meta.type === "project-title") return { hpt: 24 };
+      if (meta.type === "project-label") return { hpt: 21 };
+      if (meta.type === "project-value") return { hpt: 21 };
+      if (meta.type === "project-space") return { hpt: 8 };
+      return { hpt: 21 };
     });
 
     const tableBorder = {
@@ -1156,11 +1312,12 @@ export const ReportMonitoringPage: React.FC = () => {
     };
 
     sheetRows.forEach((row, rowIndex) => {
-      if (rowIndex < 2) {
+      const meta = rowMetadata[rowIndex];
+      if (meta.type === "header-title" || meta.type === "header-subtitle") {
+        const isTitle = meta.type === "header-title";
         for (let columnIndex = 0; columnIndex < maxColumnCount; columnIndex += 1) {
           const cellAddress = XLSX.utils.encode_cell({ r: rowIndex, c: columnIndex });
           const cell = worksheet[cellAddress] || { t: "s", v: "" };
-          const isTitle = rowIndex === 0;
 
           cell.s = {
             alignment: {
@@ -1185,18 +1342,16 @@ export const ReportMonitoringPage: React.FC = () => {
         }
         return;
       }
-      if (rowIndex === 2) return;
-
-      const blockRow = (rowIndex - headerRowCount) % 4;
-      if (blockRow === 3) return;
+      if (meta.type === "header-space" || meta.type === "project-space") return;
 
       row.forEach((_value, columnIndex) => {
         const cellAddress = XLSX.utils.encode_cell({ r: rowIndex, c: columnIndex });
         const cell = worksheet[cellAddress] || { t: "s", v: "" };
         const isProjectColumn = columnIndex === 0;
-        const isTitleRow = blockRow === 0;
-        const isLabelRow = blockRow === 1;
-        const isValueRow = blockRow === 2;
+        const isTitleRow = meta.type === "project-title";
+        const isLabelRow = meta.type === "project-label";
+        const isValueRow = meta.type === "project-value";
+        const isNotSub = isValueRow && meta.isNotSubmitted && meta.isNotSubmitted(columnIndex);
 
         cell.s = {
           ...baseCellStyle,
@@ -1206,7 +1361,7 @@ export const ReportMonitoringPage: React.FC = () => {
             color: {
               rgb: isTitleRow
                 ? "1E3A8A"
-                : isValueRow && cell.v === "Not submitted"
+                : isNotSub
                   ? "991B1B"
                   : "111827",
             },
@@ -1224,7 +1379,7 @@ export const ReportMonitoringPage: React.FC = () => {
                     : "F8FBFF"
                   : isProjectColumn
                     ? "F8FAFC"
-                    : cell.v === "Not submitted"
+                    : isNotSub
                       ? "FEE2E2"
                       : "FFFFFF",
             },
@@ -1375,20 +1530,42 @@ export const ReportMonitoringPage: React.FC = () => {
     </div>
   );
 
+  const renderIpcrRating = (rating: number | null) => {
+    if (rating === null) {
+      return (
+        <span className="text-xs font-semibold text-zinc-400 dark:text-zinc-600">
+          -
+        </span>
+      );
+    }
+    const colorClass =
+      rating === 5
+        ? "bg-emerald-50 text-emerald-700 border-emerald-250 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20"
+        : rating === 3
+          ? "bg-blue-50 text-blue-700 border-blue-250 dark:bg-blue-500/10 dark:text-blue-400 dark:border-blue-500/20"
+          : "bg-red-50 text-red-700 border-red-250 dark:bg-red-500/10 dark:text-red-400 dark:border-red-500/20";
+    return (
+      <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-extrabold ${colorClass}`}>
+        {rating}
+      </span>
+    );
+  };
+
   const renderReportRows = (rows: ReportRow[], options: { showProject: boolean }) => (
     <div className="max-h-[calc(100vh-330px)] min-h-[320px] overflow-auto rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
       <table className="w-full table-fixed border-collapse text-left">
         <colgroup>
           {options.showProject && <col className="w-[12%]" />}
-          <col className={options.showProject ? "w-[15%]" : "w-[16%]"} />
+          <col className={options.showProject ? "w-[14%]" : "w-[15%]"} />
           <col className={options.showProject ? "w-[5%]" : "w-[6%]"} />
           <col className={options.showProject ? "w-[8%]" : "w-[9%]"} />
           <col className={options.showProject ? "w-[8%]" : "w-[9%]"} />
-          <col className={options.showProject ? "w-[14%]" : "w-[15%]"} />
+          <col className={options.showProject ? "w-[5%]" : "w-[6%]"} />
+          <col className={options.showProject ? "w-[13%]" : "w-[14%]"} />
           <col className={options.showProject ? "w-[10%]" : "w-[10%]"} />
           <col className={options.showProject ? "w-[7%]" : "w-[7%]"} />
           <col className={options.showProject ? "w-[6%]" : "w-[6%]"} />
-          <col className={options.showProject ? "w-[9%]" : "w-[14%]"} />
+          <col className={options.showProject ? "w-[8%]" : "w-[12%]"} />
           <col className={options.showProject ? "w-[6%]" : "w-[8%]"} />
         </colgroup>
         <thead className="sticky top-0 z-10 bg-zinc-100 dark:bg-zinc-900">
@@ -1399,6 +1576,7 @@ export const ReportMonitoringPage: React.FC = () => {
               "Freq.",
               "Deadline",
               "Submitted",
+              "IPCR",
               "Focal / Office",
               "Reminder Window",
               "Reminder Status",
@@ -1418,91 +1596,197 @@ export const ReportMonitoringPage: React.FC = () => {
         <tbody>
           {rows.map((row) => {
             const reminderBadge = getReminderBadge(row);
+            const sId = row.report.seriesId || row.report.id;
+            const historyCount = historyMap.get(sId)?.length || 0;
+            const hasHistory = historyCount > 0;
+            const isExpanded = expandedReportSeries[sId];
+            const historyRows = hasHistory && !row.isHistory && isExpanded ? (historyMap.get(sId) || []) : [];
+
             return (
-            <tr
-              key={row.report.id}
-              className={`group border-b border-zinc-100 last:border-b-0 dark:border-zinc-800 ${
-                row.status === "overdue"
-                  ? "bg-red-50/40 dark:bg-red-500/5"
-                  : row.status === "due-soon"
-                    ? "bg-amber-50/40 dark:bg-amber-500/5"
-                    : "hover:bg-zinc-50/80 dark:hover:bg-zinc-900/50"
-              }`}
-            >
-              {options.showProject && (
-                <td className="max-w-[210px] border-r border-zinc-100 px-3 py-2 align-top dark:border-zinc-800">
-                  <p className="truncate text-xs font-bold text-zinc-900 dark:text-white">
-                    {row.project?.name || "Missing project"}
-                  </p>
-                  <p className="text-[10px] font-medium text-zinc-500">
-                    {row.project?.active === false ? "Inactive" : "Active"}
-                  </p>
-                </td>
-              )}
-              <td className="border-r border-zinc-100 px-3 py-2 align-top dark:border-zinc-800">
-                <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                  <p className="min-w-0 max-w-full truncate text-xs font-bold text-zinc-800 dark:text-zinc-100">
-                    {row.report.title}
-                  </p>
-                  <span className="inline-flex max-w-[120px] items-center truncate rounded-full border border-zinc-200 bg-white px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
-                    {row.report.period || "No period"}
-                  </span>
-                </div>
-                <div className="mt-1.5 flex flex-wrap items-center gap-1">
-                  <Badge variant={row.isHistory ? "default" : "info"} className="!px-1.5 !text-[9px]">
-                    {row.isHistory ? "History" : "Recurring"}
-                  </Badge>
-                  {row.report.generatedFromReportId && !row.isHistory && (
-                    <Badge variant="success" className="!px-1.5 !text-[9px]">Next generated</Badge>
+              <React.Fragment key={row.report.id}>
+                <tr
+                  className={`group border-b border-zinc-100 last:border-b-0 dark:border-zinc-800 ${
+                    row.status === "overdue"
+                      ? "bg-red-50/40 dark:bg-red-500/5"
+                      : row.status === "due-soon"
+                        ? "bg-amber-50/40 dark:bg-amber-500/5"
+                        : "hover:bg-zinc-50/80 dark:hover:bg-zinc-900/50"
+                  }`}
+                >
+                  {options.showProject && (
+                    <td className="max-w-[210px] border-r border-zinc-100 px-3 py-2 align-top dark:border-zinc-800">
+                      <p className="truncate text-xs font-bold text-zinc-900 dark:text-white">
+                        {row.project?.name || "Missing project"}
+                      </p>
+                      <p className="text-[10px] font-medium text-zinc-500">
+                        {row.project?.active === false ? "Inactive" : "Active"}
+                      </p>
+                    </td>
                   )}
-                </div>
-              </td>
-              <td className="border-r border-zinc-100 px-3 py-2 align-top dark:border-zinc-800">
-                <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-                  {formatReportFrequency(row.report.frequency)}
-                </span>
-              </td>
-              <td className="border-r border-zinc-100 px-3 py-2 align-top dark:border-zinc-800">
-                <span className={`text-xs font-bold ${row.status === "overdue" ? "text-red-700 dark:text-red-300" : row.status === "due-soon" ? "text-amber-700 dark:text-amber-300" : "text-zinc-900 dark:text-white"}`}>
-                  {formatReportDate(row.report.deadline)}
-                </span>
-              </td>
-              <td className="border-r border-zinc-100 px-3 py-1.5 align-top dark:border-zinc-800">{renderSubmittedCell(row.report)}</td>
-              <td className="max-w-[210px] border-r border-zinc-100 px-3 py-2 align-top dark:border-zinc-800">
-                <p className="truncate text-xs font-bold text-zinc-900 dark:text-white">
-                  {row.focal?.name || "Needs attention"}
-                </p>
-                <p className="truncate text-[10px] text-zinc-500">{row.focal?.position || row.focal?.email || "No office/unit recorded"}</p>
-              </td>
-              <td className="border-r border-zinc-100 px-3 py-2 align-top dark:border-zinc-800">
-                <p className="text-xs font-bold text-zinc-900 dark:text-white">
-                  {row.leadDays} days before
-                </p>
-                <p className="text-[11px] text-zinc-500">
-                  {row.lastReminder
-                    ? `${row.lastReminder.status}: ${formatReportDate(row.lastReminder.sentAt.slice(0, 10))}`
-                    : "Not sent"}
-                </p>
-              </td>
-              <td className="border-r border-zinc-100 px-2 py-2 text-center align-top dark:border-zinc-800">
-                <span className={`inline-flex rounded-full border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${reminderBadge.className}`}>
-                  {reminderBadge.label}
-                </span>
-              </td>
-              <td className="border-r border-zinc-100 px-2 py-2 text-center align-top dark:border-zinc-800">
-                {renderReportStatus(row.status)}
-              </td>
-              <td className="max-w-[220px] border-r border-zinc-100 px-3 py-2 align-top dark:border-zinc-800">
-                <p className="truncate text-xs text-zinc-600 dark:text-zinc-400">
-                  {row.report.remarks || "-"}
-                </p>
-              </td>
-              <td className="px-1.5 py-1.5 align-top">
-                <div className="flex justify-center gap-0.5">
-                  {renderReportActions(row)}
-                </div>
-              </td>
-            </tr>
+                  <td className="border-r border-zinc-100 px-3 py-2 align-top dark:border-zinc-800">
+                    <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                      {hasHistory && !row.isHistory ? (
+                        <button
+                          type="button"
+                          onClick={() => toggleSeriesExpanded(sId)}
+                          className="inline-flex min-w-0 max-w-full items-center gap-1 text-left text-xs font-bold text-blue-600 transition-colors hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                          title="Click to toggle submission history"
+                        >
+                          <span className="truncate underline decoration-dotted decoration-blue-400 hover:decoration-blue-600">{row.report.title}</span>
+                          <span className="ml-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-100 px-1 text-[9px] font-extrabold text-blue-700 dark:bg-blue-500/20 dark:text-blue-300 shrink-0">
+                            {historyCount}
+                          </span>
+                          {isExpanded ? (
+                            <ChevronUp size={13} className="text-blue-500 shrink-0" />
+                          ) : (
+                            <ChevronDown size={13} className="text-blue-500 shrink-0" />
+                          )}
+                        </button>
+                      ) : (
+                        <p className="min-w-0 max-w-full truncate text-xs font-bold text-zinc-800 dark:text-zinc-100">
+                          {row.report.title}
+                        </p>
+                      )}
+                      <span className="inline-flex max-w-[120px] items-center truncate rounded-full border border-zinc-200 bg-white px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
+                        {row.report.period || "No period"}
+                      </span>
+                    </div>
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                      <Badge variant={row.isHistory ? "default" : "info"} className="!px-1.5 !text-[9px]">
+                        {row.isHistory ? "History" : "Recurring"}
+                      </Badge>
+                      {row.report.generatedFromReportId && !row.isHistory && (
+                        <Badge variant="success" className="!px-1.5 !text-[9px]">Next generated</Badge>
+                      )}
+                    </div>
+                  </td>
+                  <td className="border-r border-zinc-100 px-3 py-2 align-top dark:border-zinc-800">
+                    <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                      {formatReportFrequency(row.report.frequency)}
+                    </span>
+                  </td>
+                  <td className="border-r border-zinc-100 px-3 py-2 align-top dark:border-zinc-800">
+                    <span className={`text-xs font-bold ${row.status === "overdue" ? "text-red-700 dark:text-red-300" : row.status === "due-soon" ? "text-amber-700 dark:text-amber-300" : "text-zinc-900 dark:text-white"}`}>
+                      {formatReportDate(row.report.deadline)}
+                    </span>
+                  </td>
+                  <td className="border-r border-zinc-100 px-3 py-1.5 align-top dark:border-zinc-800">{renderSubmittedCell(row.report)}</td>
+                  <td className="border-r border-zinc-100 px-2 py-2 text-center align-top dark:border-zinc-800">
+                    {renderIpcrRating(getIpcrRating(row.report.submittedDate, row.report.deadline))}
+                  </td>
+                  <td className="max-w-[210px] border-r border-zinc-100 px-3 py-2 align-top dark:border-zinc-800">
+                    <p className="truncate text-xs font-bold text-zinc-900 dark:text-white">
+                      {row.focal?.name || "Needs attention"}
+                    </p>
+                    <p className="truncate text-[10px] text-zinc-500">{row.focal?.position || row.focal?.email || "No office/unit recorded"}</p>
+                  </td>
+                  <td className="border-r border-zinc-100 px-3 py-2 align-top dark:border-zinc-800">
+                    <p className="text-xs font-bold text-zinc-900 dark:text-white">
+                      {row.leadDays} days before
+                    </p>
+                    <p className="text-[11px] text-zinc-500">
+                      {row.lastReminder
+                        ? `${row.lastReminder.status}: ${formatReportDate(row.lastReminder.sentAt.slice(0, 10))}`
+                        : "Not sent"}
+                    </p>
+                  </td>
+                  <td className="border-r border-zinc-100 px-2 py-2 text-center align-top dark:border-zinc-800">
+                    <span className={`inline-flex rounded-full border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${reminderBadge.className}`}>
+                      {reminderBadge.label}
+                    </span>
+                  </td>
+                  <td className="border-r border-zinc-100 px-2 py-2 text-center align-top dark:border-zinc-800">
+                    {renderReportStatus(row.status)}
+                  </td>
+                  <td className="max-w-[220px] border-r border-zinc-100 px-3 py-2 align-top dark:border-zinc-800">
+                    <p className="truncate text-xs text-zinc-600 dark:text-zinc-400">
+                      {row.report.remarks || "-"}
+                    </p>
+                  </td>
+                  <td className="px-1.5 py-1.5 align-top">
+                    <div className="flex justify-center gap-0.5">
+                      {renderReportActions(row)}
+                    </div>
+                  </td>
+                </tr>
+                {hasHistory && !row.isHistory && isExpanded && (
+                  <tr className="bg-zinc-50/20 dark:bg-zinc-950/20">
+                    <td colSpan={options.showProject ? 12 : 11} className="px-4 py-3 align-top">
+                      <div className="rounded-xl border border-zinc-200 bg-zinc-50/40 p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/10">
+                        <div className="flex items-center gap-2 mb-3">
+                          <CalendarClock size={15} className="text-blue-600 dark:text-blue-400" />
+                          <h4 className="text-[11px] font-extrabold uppercase tracking-wider text-zinc-700 dark:text-zinc-300">
+                            Submission History & Performance Rating
+                          </h4>
+                          <span className="rounded-full bg-zinc-200/80 px-2 py-0.5 text-[9px] font-bold text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+                            {historyRows.length} {historyRows.length === 1 ? "record" : "records"}
+                          </span>
+                        </div>
+                        <div className="grid gap-3 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+                          {historyRows.map((histRow) => {
+                            const rating = getIpcrRating(histRow.report.submittedDate, histRow.report.deadline);
+                            const ratingColorClass =
+                              rating === 5
+                                ? "bg-emerald-50 text-emerald-700 border-emerald-250 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20"
+                                : rating === 3
+                                  ? "bg-blue-50 text-blue-700 border-blue-250 dark:bg-blue-500/10 dark:text-blue-400 dark:border-blue-500/20"
+                                  : "bg-red-50 text-red-700 border-red-250 dark:bg-red-500/10 dark:text-red-400 dark:border-red-500/20";
+
+                            return (
+                              <div
+                                key={histRow.report.id}
+                                className="relative flex flex-col justify-between rounded-xl border border-zinc-200 bg-white p-3.5 shadow-sm transition-all hover:border-blue-300 hover:shadow-md dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-blue-900/30 w-full max-w-[240px]"
+                              >
+                                <div>
+                                  <div className="flex items-center justify-between gap-1 mb-2.5">
+                                    <span className="truncate text-xs font-extrabold text-zinc-850 dark:text-white">
+                                      {histRow.report.period || "No Period"}
+                                    </span>
+                                    {rating !== null ? (
+                                      <span className={`inline-flex rounded-full border px-2 py-0.5 text-[9px] font-black tracking-wider ${ratingColorClass}`}>
+                                        IPCR {rating}
+                                      </span>
+                                    ) : (
+                                      <span className="text-[10px] text-zinc-400 dark:text-zinc-650">-</span>
+                                    )}
+                                  </div>
+                                  <div className="space-y-1 text-[11px] text-zinc-600 dark:text-zinc-400">
+                                    <div className="flex justify-between">
+                                      <span className="text-zinc-500">Deadline:</span>
+                                      <span className="font-semibold">{formatReportDate(histRow.report.deadline)}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                      <span className="text-zinc-500">Submitted:</span>
+                                      <span className="font-semibold text-zinc-800 dark:text-zinc-200">
+                                        {histRow.report.submittedDate ? formatReportDate(histRow.report.submittedDate) : "Not submitted"}
+                                      </span>
+                                    </div>
+                                    {histRow.report.remarks && (
+                                      <div className="mt-2 border-t border-zinc-150 pt-1.5 dark:border-zinc-900">
+                                        <p className="italic text-[10px] text-zinc-500 dark:text-zinc-400 line-clamp-2">
+                                          "{histRow.report.remarks}"
+                                        </p>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="mt-3 flex items-center justify-between border-t border-zinc-150 pt-2 dark:border-zinc-900">
+                                  <span className="inline-flex rounded-full bg-zinc-100 px-1.5 py-0.5 text-[9px] font-bold uppercase text-zinc-650 dark:bg-zinc-900 dark:text-zinc-400">
+                                    {formatReportFrequency(histRow.report.frequency)}
+                                  </span>
+                                  <div className="flex items-center gap-1 scale-90 origin-right">
+                                    {renderReportActions(histRow)}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
             );
           })}
         </tbody>
@@ -2167,6 +2451,15 @@ export const ReportMonitoringPage: React.FC = () => {
               </Button>
             )}
             <Button variant="ghost" onClick={() => setIsReportModalOpen(false)} className="!rounded-lg !px-3 !py-2 !text-xs">Cancel</Button>
+            {isSuperAdmin && reportForm.id && reportForm.submittedDate && (
+              <Button
+                variant="outline"
+                onClick={reactivateReport}
+                className="mr-2 border-amber-300 text-amber-700 bg-amber-50 hover:bg-amber-100 dark:border-amber-700/50 dark:text-amber-300 dark:bg-amber-500/10 dark:hover:bg-amber-500/20 !rounded-lg !px-3 !py-2 !text-xs"
+              >
+                Reactivate
+              </Button>
+            )}
             <Button variant="blue" onClick={saveReport} className="!rounded-lg !px-3 !py-2 !text-xs">Save Report</Button>
           </>
         }

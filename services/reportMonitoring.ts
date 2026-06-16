@@ -377,3 +377,17 @@ export const formatReportDate = (value?: string): string => {
     year: "numeric",
   });
 };
+
+export const getIpcrRating = (
+  submittedDate?: string,
+  deadline?: string
+): number | null => {
+  if (!submittedDate || !deadline) return null;
+  const sub = Date.parse(`${submittedDate.slice(0, 10)}T00:00:00`);
+  const dl = Date.parse(`${deadline.slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(sub) || Number.isNaN(dl)) return null;
+
+  if (sub < dl) return 5;
+  if (sub === dl) return 3;
+  return 1;
+};
