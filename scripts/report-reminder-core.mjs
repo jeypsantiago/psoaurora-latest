@@ -213,6 +213,33 @@ const getReminderCheckpoint = ({ daysUntilDeadline, leadDays, overdueReminderDay
   };
 };
 
+export const formatDisplayDate = (dateStr) => {
+  if (!dateStr) return '';
+  const parts = dateStr.slice(0, 10).split('-');
+  if (parts.length === 3) {
+    const year = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10) - 1;
+    const day = parseInt(parts[2], 10);
+    const date = new Date(year, month, day);
+    if (!Number.isNaN(date.getTime())) {
+      return date.toLocaleDateString('en-US', {
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric'
+      });
+    }
+  }
+  const date = new Date(dateStr);
+  if (!Number.isNaN(date.getTime())) {
+    return date.toLocaleDateString('en-US', {
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric'
+    });
+  }
+  return dateStr;
+};
+
 const fillTemplate = (template, values) =>
   String(template || '').replace(/\{\{(\w+)\}\}/g, (_match, key) => String(values[key] ?? ''));
 
@@ -575,7 +602,7 @@ export const runReportReminders = async ({
       projectName: project.name || 'Unnamed project',
       reportTitle: report.title || 'Untitled report',
       period: report.period || '',
-      deadline: String(report.deadline || ''),
+      deadline: formatDisplayDate(String(report.deadline || '')),
       daysUntilDeadline: String(daysUntilDeadline),
       reminderStage: checkpoint.stage,
       triggerOffsetDays: String(checkpoint.triggerOffsetDays),
@@ -1068,6 +1095,8 @@ export const sendSubmissionConfirmationEmail = async ({
   recordedVia,
 }) => {
   const subject = `[Confirmed] Submission Recorded: ${reportTitle} - ${period}`;
+  const displayDeadline = formatDisplayDate(deadline);
+  const displaySubmittedDate = formatDisplayDate(submittedDate);
   
   const htmlBody = `
 <div style="font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e4e4e7; border-radius: 12px; overflow: hidden; background-color: #ffffff; color: #18181b;">
@@ -1097,15 +1126,11 @@ export const sendSubmissionConfirmationEmail = async ({
         </tr>
         <tr>
           <td style="padding: 4px 0; color: #71717a; font-weight: 600;">Deadline:</td>
-          <td style="padding: 4px 0; color: #18181b;">${deadline}</td>
+          <td style="padding: 4px 0; color: #18181b;">${displayDeadline}</td>
         </tr>
         <tr>
           <td style="padding: 4px 0; color: #71717a; font-weight: 600;">Submitted Date:</td>
-          <td style="padding: 4px 0; color: #10b981; font-weight: 700;">${submittedDate}</td>
-        </tr>
-        <tr>
-          <td style="padding: 4px 0; color: #71717a; font-weight: 600;">Recorded Via:</td>
-          <td style="padding: 4px 0; color: #18181b; font-weight: 600;">${recordedVia}</td>
+          <td style="padding: 4px 0; color: #10b981; font-weight: 700;">${displaySubmittedDate}</td>
         </tr>
       </table>
     </div>
@@ -1132,9 +1157,8 @@ This email confirms that the submission date for the following report has been s
 Project: ${projectName}
 Report Title: ${reportTitle}
 Report Period: ${period}
-Deadline: ${deadline}
-Submitted Date: ${submittedDate}
-Recorded Via: ${recordedVia}
+Deadline: ${displayDeadline}
+Submitted Date: ${displaySubmittedDate}
 
 Thank you for keeping your reporting requirements up to date.
 ---
